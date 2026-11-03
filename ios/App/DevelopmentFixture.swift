@@ -11,6 +11,11 @@ import WoVoiceCore
 enum DevelopmentFixture {
     static var microphoneEnabled: Bool { ProcessInfo.processInfo.arguments.contains("--fixture-microphone") }
     static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("--fixture") || microphoneEnabled }
+    @ViewBuilder static func dashboard(model: AppModel) -> some View {
+        if enabled, ProcessInfo.processInfo.arguments.contains("--fixture-large-text") {
+            DashboardView(model: model).dynamicTypeSize(.accessibility5)
+        } else { DashboardView(model: model) }
+    }
     static func makeModel(useMicrophone: Bool = false, clock: @escaping () -> ContinuousClock.Instant = { .now }) throws -> AppModel {
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [DevelopmentServer.self]
         let capture: any CaptureEngine = useMicrophone ? AudioCapture() : FixtureCapture()

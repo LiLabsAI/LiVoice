@@ -22,6 +22,10 @@ For isolated development checks, launch a Debug build with `--fixture`. The visi
 
 `--fixture-microphone` uses the same local-only server and in-memory account with the **real microphone engine**. The visible banner identifies the test mode. Use it only after obtaining microphone-test permission: audio stays in memory, the server does not perform speech recognition, and all audio is discarded afterward. This mode is also excluded from Release builds.
 
+Add `--fixture-large-text` to preview the main app at the largest accessibility text size without changing system settings. `--fixture-shortcut` queues the same foreground handoff used by the App Shortcut. These flags require a fixture mode and do not prove system shortcut routing or change the keyboard extension’s system text size.
+
+[Distribution and privacy notes](DISTRIBUTION.md) describe provisioning, data declarations and remaining release gates.
+
 For a physical device select your own Apple development team for all targets, provision the `group.com.aliahad.wovoice.ios` App Group, and enable the same App Group on the app and keyboard. Never put signing keys or profiles in this repository. The default identifiers are `com.aliahad.wovoice.ios` and `com.aliahad.wovoice.ios.keyboard`; customize `WOVOICE_APP_GROUP` consistently if those identifiers belong to another team.
 
 ## Dictation in other apps
@@ -30,7 +34,8 @@ For a physical device select your own Apple development team for all targets, pr
 2. In iOS Settings → General → Keyboard → Keyboards, add WoVoice and allow Full Access. Offline typing and the globe key work without Full Access.
 3. In WoVoice, start a five-minute keyboard session. The microphone remains active for the duration, and audio between dictations is discarded in memory.
 4. Return to the desired app, choose WoVoice with the globe key, and tap Speak/Finish. The extension inserts only if the original document, cursor context and selection still match.
-5. Stop the session in WoVoice, or let it expire. Audio interruptions and force-quit end it. Expired or unavailable sessions show setup guidance.
+5. For a system shortcut, create one in Apple Shortcuts and add WoVoice → **Start WoVoice keyboard session**. The direct action works in simulator testing; the automatically supplied tile still has a provider-lookup issue under investigation.
+6. Stop the session in WoVoice, or let it expire. Audio interruptions and force-quit end it. Expired or unavailable sessions show setup guidance.
 
 iOS has no Android accessibility bubble. Password fields, phone pads, and apps that reject third-party keyboards use the system keyboard. The keyboard cannot identify WhatsApp/Mail or read whole conversations. Automatic context uses exposed field traits and, only with consent, bounded cursor snippets. No unsupported URL-opening or private APIs are used.
 

@@ -29,6 +29,7 @@ struct DashboardView: View {
 struct HomeView: View {
     @Bindable var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var period = AnalyticsPeriod.today
     private var metrics: Metrics { Metrics(records: model.analytics, since: period.since()) }
     var body: some View {
@@ -40,9 +41,11 @@ struct HomeView: View {
                     if DevelopmentFixture.microphoneEnabled { Text("Audio stays on this computer. The test service returns a fixed sentence; it does not recognize your speech.").font(.caption).foregroundStyle(.secondary) }
                 }
                 #endif
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Your words.\nA little clearer.").font(.system(size: 36, weight: .semibold, design: .rounded)).tracking(-1)
-                    Text("Speak naturally. WoVoice handles the grammar and punctuation.").foregroundStyle(.secondary)
+                if model.owner == nil || !dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Your words.\nA little clearer.").font(.system(.largeTitle, design: .rounded, weight: .semibold)).tracking(-1)
+                        Text("Speak naturally. WoVoice handles the grammar and punctuation.").foregroundStyle(.secondary)
+                    }
                 }
                 if model.owner == nil {
                     VStack(alignment: .leading, spacing: 16) {
@@ -53,10 +56,11 @@ struct HomeView: View {
                     }.card()
                 } else {
                     VStack(spacing: 20) {
-                        HStack {
-                            Circle().fill(model.microphoneActive ? .orange : Color.secondary.opacity(0.4)).frame(width: 7, height: 7)
-                            Text(model.microphoneActive ? "Microphone active" : "Microphone off").font(.subheadline)
-                            Spacer()
+                        adaptiveRow {
+                            Label {
+                                Text(model.microphoneActive ? "Microphone active" : "Microphone off")
+                            } icon: { Circle().fill(model.microphoneActive ? .orange : Color.secondary.opacity(0.4)).frame(width: 7, height: 7) }.font(.subheadline)
+                            if !dynamicTypeSize.isAccessibilitySize { Spacer() }
                             if model.keyboardSessionActive { Text(model.status.expiresAt, style: .timer).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary) }
                         }
                         Button {
@@ -93,13 +97,14 @@ struct HomeView: View {
                         }.card()
                     }
                     keyboardSetup
-                    Picker("Period", selection: $period) { ForEach(AnalyticsPeriod.allCases, id: \.self) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
-                    HStack(spacing: 16) {
+                    if dynamicTypeSize.isAccessibilitySize { periodPicker.pickerStyle(.menu) }
+                    else { periodPicker.pickerStyle(.segmented) }
+                    adaptiveRow {
                         metric("Words", value: metrics.words.formatted())
                         metric("Dictations", value: metrics.dictations.formatted())
                         if let quota = model.profile?.quota { metric("Minutes left", value: String(format: "%.1f", quota.remainingAudioSeconds / 60)) }
                     }
-                    HStack(spacing: 16) { metric("Speaking pace", value: "\(metrics.wpm) wpm"); metric("Dictation time", value: "\(Int(metrics.audioMs/1000)) sec") }
+                    adaptiveRow { metric("Speaking pace", value: "\(metrics.wpm) wpm"); metric("Dictation time", value: "\(Int(metrics.audioMs/1000)) sec") }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("AI insights").font(.headline)
                         LabeledContent("Median processing", value: String(format: "%.1f sec", metrics.medianProcessingMs/1000))
@@ -117,6 +122,12 @@ struct HomeView: View {
         }.navigationTitle("WoVoice").toolbar {
             if model.owner != nil { Button { Task { await model.sync() } } label: { if model.syncing { ProgressView() } else { Image(systemName: "arrow.triangle.2.circlepath") } }.disabled(model.syncing).accessibilityLabel("Sync now") }
         }
+    }
+    private var adaptiveRow: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12)) : AnyLayout(HStackLayout(spacing: 16))
+    }
+    private var periodPicker: some View {
+        Picker("Period", selection: $period) { ForEach(AnalyticsPeriod.allCases, id: \.self) { Text($0.title).tag($0) } }
     }
     private var keyboardSetup: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -160,6 +171,7 @@ struct HistoryView: View {
 }
 struct DictionaryView: View {
     @Bindable var model: AppModel
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var term = ""
     @State private var editing: CloudRecord?
     @State private var editTerm = ""
@@ -168,16 +180,19 @@ struct DictionaryView: View {
     var body: some View {
         List {
             Section {
-                HStack { TextField("A name, word, or phrase", text: $term).textInputAutocapitalization(.never).autocorrectionDisabled(); Button("Add") { model.addTerm(term); term = "" }.disabled(term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.owner == nil) }
+                entryLayout {
+                    TextField("A name, word, or phrase", text: $term).font(.body).textInputAutocapitalization(.never).autocorrectionDisabled().frame(minHeight: 44)
+                    Button("Add") { model.addTerm(term); term = "" }.frame(minHeight: 44).disabled(term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.owner == nil)
+                }
             } footer: { Text("Confirmed vocabulary helps WoVoice recognize names and words you use. Up to 100 terms are included with each dictation.") }
             Section("Your vocabulary") {
                 ForEach(entries) { entry in
-                    HStack {
+                    entryLayout {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(entry.payload?["term"]?.string ?? "")
                             if entry.payload?["status"]?.string == "suggested" { Text("Suggested from a correction").font(.caption).foregroundStyle(.secondary) }
                         }
-                        Spacer()
+                        if !dynamicTypeSize.isAccessibilitySize { Spacer() }
                         if entry.payload?["status"]?.string == "suggested" {
                             Button("Confirm") { model.updateTerm(entry, term: entry.payload?["term"]?.string ?? "") }
                                 .buttonStyle(.bordered).accessibilityLabel("Confirm \(entry.payload?["term"]?.string ?? "word")")
@@ -196,6 +211,9 @@ struct DictionaryView: View {
                 Button("Save") { if let editing { model.updateTerm(editing, term: editTerm) }; editing = nil }
                 Button("Cancel", role: .cancel) { editing = nil }
             }
+    }
+    private var entryLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12)) : AnyLayout(HStackLayout(spacing: 8))
     }
 }
 

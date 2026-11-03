@@ -5,6 +5,7 @@
 ### iOS — in development
 
 - Added a native iPhone/iPad workspace with dictation, History, Dictionary, analytics, account settings, device sessions, and existing Cloudflare sync.
+- Added foreground-only shortcut activation, interruption cancellation checks, and accessible layouts for large-text Home and vocabulary controls.
 - Added dedicated voice and typing modes, vocabulary search, and visible confirmation for suggested words. Home puts dictation controls before analytics.
 - Added recovery when iOS recreates the keyboard, loses its connection, or detaches an editor. Capture and session limits use monotonic deadlines.
 - Added an offline manual keyboard and guarded voice insertion. A user-started five-minute microphone session lets the keyboard request dictation from the main app; iOS does not provide Android's floating accessibility bubble.

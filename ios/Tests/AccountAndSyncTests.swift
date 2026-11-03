@@ -47,6 +47,20 @@ private final class DetachingDocument: NSObject {
 }
 
 @Suite(.serialized) @MainActor struct AccountAndSyncTests {
+    @Test func shortcutWaitsForForegroundAndConsumesEachRequestOnce() async throws {
+        let runtime = AppRuntime()
+        let model = try DevelopmentFixture.makeModel()
+        defer { model.stopSession() }
+        runtime.requestKeyboardSession()
+        #expect(!runtime.takeKeyboardSession(whileActive: false))
+        #expect(runtime.pendingKeyboardSession && !model.microphoneActive)
+        if runtime.takeKeyboardSession(whileActive: true) { await model.startSession() }
+        #expect(model.keyboardSessionActive && !runtime.pendingKeyboardSession)
+        #expect(!runtime.takeKeyboardSession(whileActive: true))
+        model.stopSession()
+        runtime.requestKeyboardSession()
+        #expect(runtime.takeKeyboardSession(whileActive: true))
+    }
     private func api() -> APIClient {
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [FixtureProtocol.self]
         return APIClient(baseURL: URL(string: "https://fixture.invalid")!, session: URLSession(configuration: config))
@@ -189,6 +203,25 @@ private final class DetachingDocument: NSObject {
         try await Task.sleep(for: .milliseconds(500))
         #expect(!model.keyboardSessionActive)
         #expect(model.status.result == nil)
+    }
+    @Test func audioInterruptionsRouteChangesAndResetCancelPendingDictation() async throws {
+        let events: [(Notification.Name, [String: UInt])] = [
+            (AVAudioSession.interruptionNotification, [AVAudioSessionInterruptionTypeKey: AVAudioSession.InterruptionType.began.rawValue]),
+            (AVAudioSession.routeChangeNotification, [AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue]),
+            (AVAudioSession.mediaServicesWereResetNotification, [:])
+        ]
+        for (name, info) in events {
+            let model = try DevelopmentFixture.makeModel()
+            await model.startSession()
+            model.toggleRecording()
+            #expect(model.microphoneActive && model.recording)
+            NotificationCenter.default.post(name: name, object: nil, userInfo: info)
+            for _ in 0..<20 where model.microphoneActive { try await Task.sleep(for: .milliseconds(10)) }
+            #expect(!model.microphoneActive && !model.keyboardSessionActive)
+            #expect(model.status.request == nil && model.status.result == nil)
+            #expect(model.history.isEmpty && model.analytics.isEmpty)
+            model.stopSession()
+        }
     }
     @Test func historyOffKeepsAnalyticsAndNoDictatedTextRecord() async throws {
         let model = try DevelopmentFixture.makeModel()

@@ -1,17 +1,26 @@
 import AppIntents
 import Foundation
+import Observation
 
-enum AppRuntime {
-    static weak var model: AppModel?
-    static var pendingKeyboardSession = false
+@Observable final class AppRuntime {
+    static let shared = AppRuntime()
+    private(set) var pendingKeyboardSession = false
+
+    func requestKeyboardSession() { pendingKeyboardSession = true }
+    func takeKeyboardSession(whileActive active: Bool) -> Bool {
+        guard active, pendingKeyboardSession else { return false }
+        pendingKeyboardSession = false
+        return true
+    }
 }
 struct StartKeyboardSessionIntent: AppIntent {
     static let title: LocalizedStringResource = "Start WoVoice keyboard session"
     static let description = IntentDescription("Opens WoVoice and starts a five-minute microphone session for dictating from its keyboard.")
     static let openAppWhenRun = true
     @MainActor func perform() async throws -> some IntentResult {
-        if let model = AppRuntime.model { await model.startSession() }
-        else { AppRuntime.pendingKeyboardSession = true }
+        // The system can invoke perform before the app's scene is active.
+        // Leave audio activation to the foreground scene, including warm launches.
+        AppRuntime.shared.requestKeyboardSession()
         return .result()
     }
 }
