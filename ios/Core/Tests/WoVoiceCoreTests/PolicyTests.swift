@@ -2,6 +2,27 @@ import Foundation
 import Testing
 @testable import WoVoiceCore
 
+@Test func keyboardRequestRecoversFromLostAcknowledgementAndParentCancellation() {
+    let now = ContinuousClock.now; let id = UUID()
+    var pending = PendingDictation()
+    pending.begin(id: id, now: now)
+    let awaiting = pending.shouldAbandon(parentRequest: nil, now: now.advanced(by: .milliseconds(200)))
+    #expect(!awaiting)
+    #expect(pending.awaitingAcknowledgement)
+    let acknowledged = pending.shouldAbandon(parentRequest: id, now: now.advanced(by: .milliseconds(400)))
+    #expect(!acknowledged)
+    #expect(!pending.awaitingAcknowledgement)
+    let cancelledByParent = pending.shouldAbandon(parentRequest: nil, now: now.advanced(by: .seconds(1)))
+    #expect(cancelledByParent)
+    pending.reset()
+    let next = UUID(); pending.begin(id: next, now: now)
+    let neverAccepted = pending.shouldAbandon(parentRequest: id, now: now.advanced(by: .seconds(4)))
+    #expect(neverAccepted)
+    pending.reset()
+    let lateResult = pending.shouldAbandon(parentRequest: id)
+    #expect(pending.id == nil && !lateResult)
+}
+
 @Test func contextConsentAndUnicodeBudget() throws {
     #expect(DictationContext.capture(preferences: .init(), field: .text, before: "Dear Professor", after: nil) == nil)
     let c = try #require(DictationContext.capture(preferences: .init(level: .nearby), field: .text,

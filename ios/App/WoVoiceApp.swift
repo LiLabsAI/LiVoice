@@ -7,7 +7,7 @@ import SwiftUI
         do {
             let value: AppModel
             #if DEBUG
-            value = try DevelopmentFixture.enabled ? DevelopmentFixture.makeModel() : AppModel()
+            value = try DevelopmentFixture.enabled ? DevelopmentFixture.makeModel(useMicrophone: DevelopmentFixture.microphoneEnabled) : AppModel()
             #else
             value = try AppModel()
             #endif

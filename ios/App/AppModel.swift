@@ -11,6 +11,11 @@ import WoVoiceCore
     let store: RecordStore
     private let auth = WebAuthentication()
     private let audio: any CaptureEngine
+    private let clock: () -> ContinuousClock.Instant
+    private var sessionDeadline: ContinuousClock.Instant?
+    private var recordingStartedAt: ContinuousClock.Instant?
+    private var leaseDeadline: ContinuousClock.Instant?
+    private var lastLeaseID: UUID?
     private let bridge = KeyboardBridge()
     private let syncService: SyncService
     var profile: Profile?
@@ -48,10 +53,11 @@ import WoVoiceCore
     private var loadedOwner: String?
     var owner: String? { account.user?.id }
     var recording: Bool { status.phase == "recording" }
-    var keyboardSessionActive: Bool { sessionKeyboard && audio.active && status.expiresAt > .now }
+    var microphoneActive: Bool { audio.active }
+    var keyboardSessionActive: Bool { sessionKeyboard && audio.active && status.expiresAt > .now && sessionDeadline.map { clock() < $0 } == true }
 
-    init(api: APIClient = APIClient(), persistence: any SessionPersistence = KeychainSessionStore(), capture: any CaptureEngine = AudioCapture(), databaseURL: URL? = nil) throws {
-        audio = capture
+    init(api: APIClient = APIClient(), persistence: any SessionPersistence = KeychainSessionStore(), capture: any CaptureEngine = AudioCapture(), databaseURL: URL? = nil, clock: @escaping () -> ContinuousClock.Instant = { .now }) throws {
+        audio = capture; self.clock = clock
         let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: directory.path)
         var resources = URLResourceValues(); resources.isExcludedFromBackup = true
@@ -66,6 +72,7 @@ import WoVoiceCore
             do { try reload() } catch { message = error.localizedDescription }
         }
         _ = bridge.drainCommands()
+        bridge.clearLeases()
         bridge.remove("status.json")
         observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] notification in
             guard (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == AVAudioSession.InterruptionType.began.rawValue else { return }
@@ -250,9 +257,11 @@ import WoVoiceCore
             try await audio.startSession()
             guard self.owner == owner, generation == expected else { audio.stopSession(); return }
             sessionKeyboard = keyboard
+            sessionDeadline = clock().advanced(by: .seconds(keyboard ? 300 : 120))
             status.owner = owner; status.expiresAt = .now.addingTimeInterval(keyboard ? 300 : 120); status.phase = "ready"
             status.message = "Keyboard session ready · microphone active"; status.result = nil
             _ = bridge.drainCommands()
+            bridge.clearLeases()
             if keyboard, ActivityAuthorizationInfo().areActivitiesEnabled {
                 let content = ActivityContent(state: SessionActivityAttributes.ContentState(expiresAt: status.expiresAt, phase: "Microphone active · Ready"), staleDate: status.expiresAt)
                 activityID = (try? Activity.request(attributes: SessionActivityAttributes(), content: content, pushType: nil))?.id
@@ -269,12 +278,14 @@ import WoVoiceCore
         } catch { audio.stopSession(); message = error.localizedDescription }
     }
     func stopSession(message: String? = nil) {
+        if let request = status.request { bridge.removeLease(request: request) }
         generation = UUID(); upload?.cancel(); upload = nil; retryAudio = nil
         loop?.cancel(); loop = nil; audio.stopSession(); currentContext = nil
+        sessionDeadline = nil; recordingStartedAt = nil; leaseDeadline = nil; lastLeaseID = nil
         if let id = activityID { Task { await SessionActivities.end(id: id) } }
         activityID = nil
         status = KeyboardStatus(); status.message = message ?? "Open WoVoice to start a keyboard session."
-        _ = bridge.drainCommands(); publish()
+        _ = bridge.drainCommands(); bridge.clearLeases(); publish()
     }
     func toggleRecording() {
         if recording { finish() }
@@ -284,20 +295,27 @@ import WoVoiceCore
         guard audio.active, status.phase != "processing", !recording else { return }
         generation = UUID(); retryAudio = nil; currentContext = context ?? DictationContext.capture(preferences: preferences, field: .text, before: nil, after: nil); self.sentenceStart = sentenceStart; keyboardRequest = fromKeyboard
         status.request = request; status.result = nil
-        do { try audio.begin(); status.phase = "recording"; status.message = "Listening…"; publish() }
+        lastLeaseID = nil; leaseDeadline = fromKeyboard ? clock().advanced(by: .seconds(4)) : nil
+        do { try audio.begin(); recordingStartedAt = clock(); status.phase = "recording"; status.message = "Listening…"; publish() }
         catch { status.phase = "error"; status.message = error.localizedDescription; publish() }
     }
     func cancelRecording() {
+        if let request = status.request { bridge.removeLease(request: request) }
         generation = UUID(); upload?.cancel(); upload = nil; audio.cancel(); retryAudio = nil; currentContext = nil
+        recordingStartedAt = nil; leaseDeadline = nil; lastLeaseID = nil
         status.phase = "ready"; status.message = "Ready · microphone active"; status.result = nil; status.request = nil; publish()
         if !sessionKeyboard { stopSession() }
     }
     private func finish() {
         guard recording else { return }
+        recordingStartedAt = nil
         do {
             let recording = try audio.finish()
             retryAudio = (recording.wav, recording.duration, .now.addingTimeInterval(60), 0)
-            if !sessionKeyboard { audio.stopSession(); status.expiresAt = .now.addingTimeInterval(100) }
+            if !sessionKeyboard {
+                audio.stopSession(); status.expiresAt = .now.addingTimeInterval(100)
+                sessionDeadline = clock().advanced(by: .seconds(100))
+            }
             transcribe()
         } catch { status.phase = "error"; status.message = error.localizedDescription; currentContext = nil; if !sessionKeyboard { audio.stopSession() }; publish() }
     }
@@ -364,19 +382,37 @@ import WoVoiceCore
     }
     private func tick() {
         guard owner == status.owner, audio.active || (!sessionKeyboard && (status.phase == "processing" || status.phase == "error")) else { stopSession(); return }
-        guard status.expiresAt > .now else { stopSession(message: "Keyboard session ended after five minutes. Open WoVoice to start again."); return }
+        guard status.expiresAt > .now, sessionDeadline.map({ clock() < $0 }) == true else {
+            stopSession(message: sessionKeyboard ? "Keyboard session ended after five minutes. Open WoVoice to start again." : "Dictation timed out. Please try again."); return
+        }
         let meter = audio.meter; status.level = meter.level; status.elapsed = meter.duration
-        if recording && meter.duration >= 60 { finish() }
+        if keyboardRequest, let request = status.request, let deadline = leaseDeadline {
+            if let lease = bridge.lease(request: request), lease.owner == owner, lease.request == request,
+               lease.id != lastLeaseID, abs(lease.heartbeat.timeIntervalSinceNow) < 4 {
+                lastLeaseID = lease.id; leaseDeadline = clock().advanced(by: .seconds(4))
+            } else if clock() >= deadline { cancelRecording() }
+        }
+        if let startedAt = recordingStartedAt {
+            let elapsed = startedAt.duration(to: clock())
+            status.elapsed = min(60, max(0, Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds)/1e18))
+            if recording && (elapsed >= .seconds(60) || meter.duration >= 60) { finish() }
+        }
         if let expiry = status.resultExpiresAt, expiry <= .now { status.result = nil; status.resultExpiresAt = nil; if status.phase == "result" { status.phase = "ready" } }
         if let retryAudio, retryAudio.expiresAt <= .now { self.retryAudio = nil; currentContext = nil }
         for command in bridge.drainCommands() {
             if command.owner == owner, abs(command.createdAt.timeIntervalSinceNow) < 3 {
                 switch command.action {
-                case .start: begin(request: command.request, fromKeyboard: true, context: command.context, sentenceStart: command.sentenceStart)
+                case .start:
+                    if status.request != nil && status.request != command.request { cancelRecording() }
+                    begin(request: command.request, fromKeyboard: true, context: command.context, sentenceStart: command.sentenceStart)
                 case .finish: if command.request == status.request { finish() }
                 case .retry: if command.request == status.request { retry() }
                 case .cancel: if command.request == status.request { cancelRecording() }
-                case .acknowledge: if command.request == status.request { status.result = nil; status.request = nil; status.phase = "ready" }
+                case .acknowledge:
+                    if command.request == status.request {
+                        bridge.removeLease(request: command.request); leaseDeadline = nil; lastLeaseID = nil
+                        status.result = nil; status.request = nil; status.phase = "ready"
+                    }
                 case .suggest: suggestion(command.suggestion, recordID: command.recordID)
                 case .endSession: stopSession(); return
                 }

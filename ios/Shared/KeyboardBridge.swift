@@ -1,3 +1,4 @@
+import UIKit
 import Foundation
 import WoVoiceCore
 
@@ -35,6 +36,12 @@ struct KeyboardStatus: Codable {
     var recordID: String?
     var available: Bool { owner != nil && expiresAt > .now && Date.now.timeIntervalSince(heartbeat) < 4 }
 }
+struct KeyboardLease: Codable {
+    let id: UUID
+    let request: UUID
+    let owner: String
+    let heartbeat: Date
+}
 struct KeyboardBridge {
     private let container: URL?
     init() {
@@ -55,6 +62,16 @@ struct KeyboardBridge {
         try JSONEncoder().encode(value).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
     func remove(_ name: String) { if let url = container?.appendingPathComponent(name) { try? FileManager.default.removeItem(at: url) } }
+    func renewLease(request: UUID, owner: String) throws {
+        try write(KeyboardLease(id: UUID(), request: request, owner: owner, heartbeat: .now), name: leaseName(request))
+    }
+    func lease(request: UUID) -> KeyboardLease? { read(leaseName(request), as: KeyboardLease.self) }
+    func removeLease(request: UUID) { remove(leaseName(request)) }
+    private func leaseName(_ request: UUID) -> String { "lease-\(request.uuidString).json" }
+    func clearLeases() {
+        guard let container, let files = try? FileManager.default.contentsOfDirectory(at: container, includingPropertiesForKeys: nil) else { return }
+        for file in files where file.lastPathComponent.hasPrefix("lease-") && file.pathExtension == "json" { try? FileManager.default.removeItem(at: file) }
+    }
     func enqueue(_ command: KeyboardCommand) throws {
         guard let directory = container?.appendingPathComponent("commands", isDirectory: true) else { throw APIError(code: "APP_GROUP_UNAVAILABLE", message: "The shared keyboard container is unavailable.") }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -71,5 +88,15 @@ struct KeyboardBridge {
             try? FileManager.default.removeItem(at: file)
         }
         return commands.sorted { $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt < $1.createdAt }
+    }
+}
+
+/// UIKit can return nil while detaching an editor despite the nonnull Swift
+/// declaration. KVC reads the public Objective-C property without forcing its
+/// UUID bridge; an unavailable identity must never be used for insertion.
+enum EditorIdentity {
+    static func document(from object: NSObject) -> UUID? {
+        guard object.responds(to: #selector(getter: UITextDocumentProxy.documentIdentifier)) else { return nil }
+        return object.value(forKey: #keyPath(UITextDocumentProxy.documentIdentifier)) as? UUID
     }
 }

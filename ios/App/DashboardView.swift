@@ -11,6 +11,8 @@ struct DashboardView: View {
             NavigationStack { DictionaryView(model: model) }.tabItem { Label("Dictionary", systemImage: "text.book.closed") }.tag(2)
             NavigationStack { SettingsView(model: model) }.tabItem { Label("Settings", systemImage: "gearshape") }.tag(3)
         }
+        // Recreate navigation and pending dialogs when the signed-in account changes.
+        .id(model.owner)
         .tint(.primary)
         .safeAreaInset(edge: .bottom) {
             if model.undoRecord != nil {
@@ -34,7 +36,8 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 28) {
                 #if DEBUG
                 if DevelopmentFixture.enabled {
-                    NavigationLink("Sample workspace · Test editors") { FixtureEditorsView() }.font(.caption).foregroundStyle(.orange)
+                    NavigationLink(DevelopmentFixture.microphoneEnabled ? "Local microphone test · Test editors" : "Sample workspace · Test editors") { FixtureEditorsView() }.font(.caption).foregroundStyle(.orange)
+                    if DevelopmentFixture.microphoneEnabled { Text("Audio stays on this computer. The test service returns a fixed sentence; it does not recognize your speech.").font(.caption).foregroundStyle(.secondary) }
                 }
                 #endif
                 VStack(alignment: .leading, spacing: 8) {
@@ -49,28 +52,10 @@ struct HomeView: View {
                             .buttonStyle(.borderedProminent).disabled(model.busy).accessibilityIdentifier("signIn")
                     }.card()
                 } else {
-                    Picker("Period", selection: $period) { ForEach(AnalyticsPeriod.allCases, id: \.self) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
-                    HStack(spacing: 16) {
-                        metric("Words", value: metrics.words.formatted())
-                        metric("Dictations", value: metrics.dictations.formatted())
-                        if let quota = model.profile?.quota { metric("Minutes left", value: String(format: "%.1f", quota.remainingAudioSeconds / 60)) }
-                    }
-                    HStack(spacing: 16) { metric("Speaking pace", value: "\(metrics.wpm) wpm"); metric("Dictation time", value: "\(Int(metrics.audioMs/1000)) sec") }
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("AI insights").font(.headline)
-                        LabeledContent("Median processing", value: String(format: "%.1f sec", metrics.medianProcessingMs/1000))
-                        LabeledContent("Polished results", value: "\(metrics.polishedPercent)%")
-                        LabeledContent("Correction rate", value: "\(metrics.correctedPercent)%")
-                        if model.costEstimates {
-                            LabeledContent("Estimated AI usage", value: String(format: "$%.4f", metrics.cost))
-                            Text(String(format: "%.1f neurons · ASR %.1f · Cleanup %.1f", metrics.asrNeurons + metrics.polishNeurons, metrics.asrNeurons, metrics.polishNeurons)).font(.caption).foregroundStyle(.secondary)
-                            Text("WoVoice estimates in USD, not a Cloudflare invoice.").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }.font(.subheadline).card()
                     VStack(spacing: 20) {
                         HStack {
-                            Circle().fill(model.keyboardSessionActive ? .orange : Color.secondary.opacity(0.4)).frame(width: 7, height: 7)
-                            Text(model.keyboardSessionActive ? "Microphone active" : "Microphone off").font(.subheadline)
+                            Circle().fill(model.microphoneActive ? .orange : Color.secondary.opacity(0.4)).frame(width: 7, height: 7)
+                            Text(model.microphoneActive ? "Microphone active" : "Microphone off").font(.subheadline)
                             Spacer()
                             if model.keyboardSessionActive { Text(model.status.expiresAt, style: .timer).font(.subheadline.monospacedDigit()).foregroundStyle(.secondary) }
                         }
@@ -108,6 +93,24 @@ struct HomeView: View {
                         }.card()
                     }
                     keyboardSetup
+                    Picker("Period", selection: $period) { ForEach(AnalyticsPeriod.allCases, id: \.self) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
+                    HStack(spacing: 16) {
+                        metric("Words", value: metrics.words.formatted())
+                        metric("Dictations", value: metrics.dictations.formatted())
+                        if let quota = model.profile?.quota { metric("Minutes left", value: String(format: "%.1f", quota.remainingAudioSeconds / 60)) }
+                    }
+                    HStack(spacing: 16) { metric("Speaking pace", value: "\(metrics.wpm) wpm"); metric("Dictation time", value: "\(Int(metrics.audioMs/1000)) sec") }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("AI insights").font(.headline)
+                        LabeledContent("Median processing", value: String(format: "%.1f sec", metrics.medianProcessingMs/1000))
+                        LabeledContent("Polished results", value: "\(metrics.polishedPercent)%")
+                        LabeledContent("Correction rate", value: "\(metrics.correctedPercent)%")
+                        if model.costEstimates {
+                            LabeledContent("Estimated AI usage", value: String(format: "$%.4f", metrics.cost))
+                            Text(String(format: "%.1f neurons · ASR %.1f · Cleanup %.1f", metrics.asrNeurons + metrics.polishNeurons, metrics.asrNeurons, metrics.polishNeurons)).font(.caption).foregroundStyle(.secondary)
+                            Text("WoVoice estimates in USD, not a Cloudflare invoice.").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }.font(.subheadline).card()
                 }
                 Text("English (India) · Up to 60 seconds per dictation").font(.caption).foregroundStyle(.secondary)
             }.padding(24).frame(maxWidth: 720, alignment: .leading).frame(maxWidth: .infinity)
@@ -160,14 +163,26 @@ struct DictionaryView: View {
     @State private var term = ""
     @State private var editing: CloudRecord?
     @State private var editTerm = ""
+    @State private var search = ""
+    private var entries: [CloudRecord] { model.dictionary.filter { search.isEmpty || ($0.payload?["term"]?.string ?? "").localizedCaseInsensitiveContains(search) } }
     var body: some View {
         List {
             Section {
                 HStack { TextField("A name, word, or phrase", text: $term).textInputAutocapitalization(.never).autocorrectionDisabled(); Button("Add") { model.addTerm(term); term = "" }.disabled(term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.owner == nil) }
             } footer: { Text("Confirmed vocabulary helps WoVoice recognize names and words you use. Up to 100 terms are included with each dictation.") }
             Section("Your vocabulary") {
-                ForEach(model.dictionary) { entry in
-                    HStack { Text(entry.payload?["term"]?.string ?? ""); Spacer(); Text(entry.payload?["status"]?.string == "suggested" ? "Suggested" : "Confirmed").font(.caption).foregroundStyle(.secondary) }
+                ForEach(entries) { entry in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(entry.payload?["term"]?.string ?? "")
+                            if entry.payload?["status"]?.string == "suggested" { Text("Suggested from a correction").font(.caption).foregroundStyle(.secondary) }
+                        }
+                        Spacer()
+                        if entry.payload?["status"]?.string == "suggested" {
+                            Button("Confirm") { model.updateTerm(entry, term: entry.payload?["term"]?.string ?? "") }
+                                .buttonStyle(.bordered).accessibilityLabel("Confirm \(entry.payload?["term"]?.string ?? "word")")
+                        } else { Image(systemName: "checkmark.circle").foregroundStyle(.secondary).accessibilityLabel("Confirmed") }
+                    }
                         .swipeActions { Button("Delete", role: .destructive) { model.delete(entry) } }
                         .contextMenu {
                             Button("Edit") { editTerm = entry.payload?["term"]?.string ?? ""; editing = entry }
@@ -175,7 +190,7 @@ struct DictionaryView: View {
                         }
                 }
             }
-        }.navigationTitle("Dictionary")
+        }.navigationTitle("Dictionary").searchable(text: $search, prompt: "Search vocabulary")
             .alert("Edit vocabulary", isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
                 TextField("Word or phrase", text: $editTerm)
                 Button("Save") { if let editing { model.updateTerm(editing, term: editTerm) }; editing = nil }

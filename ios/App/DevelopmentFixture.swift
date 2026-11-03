@@ -5,14 +5,17 @@ import UIKit
 import WebKit
 import WoVoiceCore
 
-/// Explicit simulator test mode: synthetic account, audio, and server. Never
-/// enabled in Release, never contacts production, and never writes credentials.
+/// Explicit local test mode: synthetic account/server and generated audio by
+/// default. The microphone variant requires separate permission. Never enabled
+/// in Release, never contacts production, and never writes credentials.
 enum DevelopmentFixture {
-    static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("--fixture") }
-    static func makeModel() throws -> AppModel {
+    static var microphoneEnabled: Bool { ProcessInfo.processInfo.arguments.contains("--fixture-microphone") }
+    static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("--fixture") || microphoneEnabled }
+    static func makeModel(useMicrophone: Bool = false, clock: @escaping () -> ContinuousClock.Instant = { .now }) throws -> AppModel {
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [DevelopmentServer.self]
+        let capture: any CaptureEngine = useMicrophone ? AudioCapture() : FixtureCapture()
         let model = try AppModel(api: APIClient(baseURL: URL(string: "https://fixture.invalid")!, session: URLSession(configuration: config)),
-                                 persistence: FixtureSessionStore(), capture: FixtureCapture(), databaseURL: URL(fileURLWithPath: ":memory:"))
+                                 persistence: FixtureSessionStore(), capture: capture, databaseURL: URL(fileURLWithPath: ":memory:"), clock: clock)
         let tokens = try JSONDecoder().decode(Tokens.self, from: DevelopmentServer.tokens)
         try model.account.accept(tokens); try model.reload()
         model.addTerm("Rahman")
@@ -80,7 +83,7 @@ struct FixtureEditorsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
                 Text("Synthetic editor tests").font(.headline)
-                Text("Uses invented text and audio. No microphone or production service.").font(.caption).foregroundStyle(.secondary)
+                Text(DevelopmentFixture.microphoneEnabled ? "Local microphone test. Audio stays on this computer; the test service returns a fixed sentence." : "Uses invented text and audio. No microphone or production service.").font(.caption).foregroundStyle(.secondary)
                 Picker("Editor", selection: $kind) { Text("Native").tag(0); Text("Web").tag(1); Text("Password").tag(2) }.pickerStyle(.segmented)
                 if kind == 0 {
                     Text("Native rich text").font(.subheadline)

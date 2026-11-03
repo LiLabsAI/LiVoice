@@ -63,7 +63,8 @@ public struct APIClient: Sendable {
         append("\r\n--\(boundary)\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"voice.wav\"\r\nContent-Type: audio/wav\r\n\r\n")
         body.append(wav); append("\r\n--\(boundary)--\r\n")
         let data = try await send("/v1/transcriptions", method: "POST", token: token, body: body, timeout: 90, contentType: "multipart/form-data; boundary=\(boundary)")
-        return try JSONDecoder().decode(Transcription.self, from: data)
+        do { return try JSONDecoder().decode(Transcription.self, from: data) }
+        catch { throw APIError(code: "INVALID_RESPONSE", message: "WoVoice sent an unreadable response. Try again.", retryable: true) }
     }
     public func pull(token: String, cursor: Int) async throws -> CloudPage {
         try await request("/v2/sync?cursor=\(cursor)&limit=50", token: token, timeout: 30)

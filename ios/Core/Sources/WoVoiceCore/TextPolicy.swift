@@ -1,5 +1,25 @@
 import Foundation
 
+/// A keyboard may be recreated while the containing app still has an older
+/// request. Tolerate the initial IPC delay, then release an ended or unaccepted
+/// request so the next Speak tap can start a fresh dictation.
+public struct PendingDictation: Sendable {
+    public private(set) var id: UUID?
+    private var accepted = false
+    private var deadline: ContinuousClock.Instant?
+    public init() {}
+    public var awaitingAcknowledgement: Bool { id != nil && !accepted }
+    public mutating func begin(id: UUID, now: ContinuousClock.Instant = .now) {
+        self.id = id; accepted = false; deadline = now.advanced(by: .seconds(3))
+    }
+    public mutating func reset() { id = nil; accepted = false; deadline = nil }
+    public mutating func shouldAbandon(parentRequest: UUID?, now: ContinuousClock.Instant = .now) -> Bool {
+        guard let id else { return false }
+        if parentRequest == id { accepted = true; return false }
+        return accepted || deadline.map { now >= $0 } == true
+    }
+}
+
 public enum TextPolicy {
     public static func sentenceStart(before: String?) -> Bool {
         guard let last = before?.replacingOccurrences(of: "[ \\t\\u00a0]+$", with: "", options: .regularExpression).last else { return true }

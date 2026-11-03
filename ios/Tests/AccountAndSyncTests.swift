@@ -42,6 +42,10 @@ private nonisolated final class FixtureProtocol: URLProtocol, @unchecked Sendabl
     override func stopLoading() {}
 }
 
+private final class DetachingDocument: NSObject {
+    @objc dynamic var documentIdentifier: NSUUID?
+}
+
 @Suite(.serialized) @MainActor struct AccountAndSyncTests {
     private func api() -> APIClient {
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [FixtureProtocol.self]
@@ -52,6 +56,24 @@ private nonisolated final class FixtureProtocol: URLProtocol, @unchecked Sendabl
         {"accessToken":"\(access)","refreshToken":"refresh","accessExpiresIn":900,"refreshExpiresIn":2592000,
          "user":{"id":"\(owner)","email":"fixture@example.test","role":"user","accountStatus":{"state":"active","supportEmail":"support@example.test"}}}
         """.utf8))
+    }
+    @Test func missingEditorIdentityIsSafeDuringKeyboardTeardown() {
+        let document = DetachingDocument()
+        #expect(EditorIdentity.document(from: document) == nil)
+        let id = UUID(); document.documentIdentifier = id as NSUUID
+        #expect(EditorIdentity.document(from: document) == id)
+        document.documentIdentifier = nil
+        #expect(EditorIdentity.document(from: document) == nil)
+        #expect(EditorIdentity.document(from: NSObject()) == nil)
+    }
+    @Test func unreadableTranscriptionCanBeRetriedWithoutRecordingAgain() async throws {
+        FixtureProtocol.router.configure { _,_ in (200, Data("not-json".utf8)) }
+        do {
+            _ = try await api().transcribe(token: "fixture", wav: Data(), glossary: [], context: nil, sentenceStart: true)
+            Issue.record("Expected an unreadable response error")
+        } catch let error as APIError {
+            #expect(error.code == "INVALID_RESPONSE" && error.retryable)
+        }
     }
     @Test func rotatingRefreshIsSingleFlightAndPersisted() async throws {
         let refreshed = try JSONEncoder().encode(tokens("rotated"))
@@ -82,15 +104,38 @@ private nonisolated final class FixtureProtocol: URLProtocol, @unchecked Sendabl
         defer { model.stopSession() }
         await model.startSession(keyboard: false)
         model.toggleRecording()
-        #expect(model.recording)
+        #expect(model.recording && model.microphoneActive)
         model.toggleRecording()
         for _ in 0..<100 where model.history.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
         #expect(model.history.count == 1)
         #expect(model.analytics.count == 1)
         #expect(model.lastText == "I would like to meet Professor Rahman tomorrow.")
-        #expect(!model.keyboardSessionActive && !model.recording)
+        #expect(!model.keyboardSessionActive && !model.recording && !model.microphoneActive)
         try await Task.sleep(for: .milliseconds(100))
         #expect(model.message == nil)
+    }
+    @Test func recordingStopsAfterSixtySecondsEvenWhenSampleDeliveryStalls() async throws {
+        var instant = ContinuousClock.now
+        let model = try DevelopmentFixture.makeModel(clock: { instant })
+        defer { model.stopSession() }
+        await model.startSession(keyboard: false)
+        model.toggleRecording()
+        instant = instant.advanced(by: .seconds(61))
+        for _ in 0..<100 where model.history.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(!model.recording && model.history.count == 1)
+        // Fixture sample duration is one second; completion is driven by the monotonic deadline.
+        #expect(model.history.first?.payload?["audioDurationMs"]?.number == 1000)
+    }
+    @Test func keyboardSessionExpiresWithoutDependingOnTheWallClock() async throws {
+        var instant = ContinuousClock.now
+        let model = try DevelopmentFixture.makeModel(clock: { instant })
+        defer { model.stopSession() }
+        await model.startSession()
+        #expect(model.keyboardSessionActive)
+        instant = instant.advanced(by: .seconds(301))
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(!model.keyboardSessionActive && model.status.owner == nil)
+        #expect(model.status.message.contains("five minutes"))
     }
     @Test func keyboardStartFinishCancelCommandsAreNotLost() async throws {
         let model = try DevelopmentFixture.makeModel()
@@ -105,6 +150,33 @@ private nonisolated final class FixtureProtocol: URLProtocol, @unchecked Sendabl
         #expect(model.history.isEmpty)
         #expect(model.status.phase == "ready")
         #expect(model.status.result == nil)
+    }
+    @Test func recreatedKeyboardCanReplaceAnOrphanedRequest() async throws {
+        let model = try DevelopmentFixture.makeModel()
+        defer { model.stopSession() }
+        await model.startSession()
+        let bridge = KeyboardBridge(); let first = UUID(); let second = UUID(); let now = Date.now
+        try bridge.enqueue(.init(id: UUID(), request: first, owner: "fixture", action: .start, createdAt: now, context: nil, sentenceStart: true))
+        try bridge.enqueue(.init(id: UUID(), request: second, owner: "fixture", action: .start, createdAt: now.addingTimeInterval(0.001), context: nil, sentenceStart: true))
+        try bridge.renewLease(request: second, owner: "fixture")
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(model.recording && model.status.request == second)
+        #expect(model.history.isEmpty)
+    }
+    @Test func keyboardEvictionOrPermissionLossCancelsCapture() async throws {
+        var instant = ContinuousClock.now
+        let model = try DevelopmentFixture.makeModel(clock: { instant })
+        defer { model.stopSession() }
+        await model.startSession()
+        let bridge = KeyboardBridge(); let request = UUID()
+        try bridge.renewLease(request: request, owner: "fixture")
+        try bridge.enqueue(.init(id: UUID(), request: request, owner: "fixture", action: .start, createdAt: .now, context: nil, sentenceStart: true))
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(model.recording)
+        instant = instant.advanced(by: .seconds(5))
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(!model.recording && model.status.phase == "ready")
+        #expect(model.history.isEmpty && model.status.result == nil)
     }
     @Test func liveActivityRegistersAndStopIntentEndsKeyboardSession() async throws {
         try #require(ActivityAuthorizationInfo().areActivitiesEnabled, "Enable Live Activities in this test simulator.")

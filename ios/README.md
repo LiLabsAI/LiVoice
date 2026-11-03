@@ -20,6 +20,8 @@ Open `WoVoice.xcodeproj` in Xcode, choose an installed iPhone/iPad simulator and
 
 For isolated development checks, launch a Debug build with `--fixture`. The visible **Sample workspace** uses an in-memory account/database, generated audio, and a URLProtocol fake service. It cannot contact the production API and is excluded from Release builds. Its native/WebKit/password editors exercise the real keyboard extension, including formatting preservation and cursor-change cancellation. Simulator keyboard Full Access still requires an explicit user choice.
 
+`--fixture-microphone` uses the same local-only server and in-memory account with the **real microphone engine**. The visible banner identifies the test mode. Use it only after obtaining microphone-test permission: audio stays in memory, the server does not perform speech recognition, and all audio is discarded afterward. This mode is also excluded from Release builds.
+
 For a physical device select your own Apple development team for all targets, provision the `group.com.aliahad.wovoice.ios` App Group, and enable the same App Group on the app and keyboard. Never put signing keys or profiles in this repository. The default identifiers are `com.aliahad.wovoice.ios` and `com.aliahad.wovoice.ios.keyboard`; customize `WOVOICE_APP_GROUP` consistently if those identifiers belong to another team.
 
 ## Dictation in other apps
