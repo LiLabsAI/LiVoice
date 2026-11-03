@@ -34,7 +34,7 @@ For a physical device select your own Apple development team for all targets, pr
 2. In iOS Settings → General → Keyboard → Keyboards, add WoVoice and allow Full Access. Offline typing and the globe key work without Full Access.
 3. In WoVoice, start a five-minute keyboard session. The microphone remains active for the duration, and audio between dictations is discarded in memory.
 4. Return to the desired app, choose WoVoice with the globe key, and tap Speak/Finish. The extension inserts only if the original document, cursor context and selection still match.
-5. For a system shortcut, create one in Apple Shortcuts and add WoVoice → **Start WoVoice keyboard session**. The direct action works in simulator testing; the automatically supplied tile still has a provider-lookup issue under investigation.
+5. For a system shortcut, create one in Apple Shortcuts and add WoVoice → **Start WoVoice keyboard session**. The direct action works on the tested iOS 26.5 simulator; the automatic tile also works on iOS 27.2. Its older-runtime provider-lookup failure is isolated in [a minimal diagnostic](diagnostics/shortcut-provider/README.md).
 6. Stop the session in WoVoice, or let it expire. Audio interruptions and force-quit end it. Expired or unavailable sessions show setup guidance.
 
 iOS has no Android accessibility bubble. Password fields, phone pads, and apps that reject third-party keyboards use the system keyboard. The keyboard cannot identify WhatsApp/Mail or read whole conversations. Automatic context uses exposed field traits and, only with consent, bounded cursor snippets. No unsupported URL-opening or private APIs are used.
