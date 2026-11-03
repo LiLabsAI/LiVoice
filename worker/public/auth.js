@@ -167,7 +167,11 @@ codeForm?.addEventListener("submit", async (event) => {
     });
     const desktopPort = params.get("redirect_port");
     let target;
-    if (params.get("platform") === "desktop" && /^\d{4,5}$/.test(desktopPort)) {
+    if (params.get("platform") === "ios") {
+      // Fixed callback scheme only; no caller-supplied redirect URL. The iOS
+      // system authentication session receives this PKCE-bound code + state.
+      target = new URL("wovoice-ios://callback");
+    } else if (params.get("platform") === "desktop" && /^\d{4,5}$/.test(desktopPort)) {
       // Desktop clients listen on a loopback port; the PKCE verifier never
       // leaves the app, so the code is useless to anything intercepting it.
       target = new URL(`http://127.0.0.1:${desktopPort}/callback`);

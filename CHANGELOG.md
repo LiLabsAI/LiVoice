@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### iOS — in development
+
+- Added a native iPhone/iPad workspace with dictation, History, Dictionary, analytics, account settings, device sessions, and existing Cloudflare sync.
+- Added an offline manual keyboard and guarded voice insertion. A user-started five-minute microphone session lets the keyboard request dictation from the main app; iOS does not provide Android's floating accessibility bubble.
+- Added optional automatic context from exposed field traits and separately consented cursor snippets, plus correction suggestions for review.
+- Added a session shortcut and a Live Activity with a Stop control. Microphone access, keyboard Full Access, device signing, and editor compatibility remain subject to iOS requirements.
+- Added Swift policy/storage tests, simulator account/audio/sync tests, synthetic editor fixtures, and an iOS CI workflow. Production iOS distribution is not yet released.
+
 ## Desktop 1.2.1 — 2026-11-03
 
 - Fixed CI packaging to sign the Mac app and native helpers explicitly when a Developer ID identity is not configured. A separate ad-hoc entitlements file keeps hardened runtime enabled and permits Electron’s bundled frameworks.

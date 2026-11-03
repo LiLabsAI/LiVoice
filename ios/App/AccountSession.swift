@@ -1,0 +1,146 @@
+import AuthenticationServices
+import CryptoKit
+import Foundation
+import Observation
+import Security
+import UIKit
+import WoVoiceCore
+
+protocol SessionPersistence {
+    func load() throws -> StoredSession?
+    func save(_ value: StoredSession) throws
+    func remove() throws
+}
+struct KeychainSessionStore: SessionPersistence {
+    private let service: String
+    init(service: String = "com.aliahad.wovoice.ios.session") { self.service = service }
+    private var query: [String: Any] { [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "current"] }
+    func load() throws -> StoredSession? {
+        var q = query; q[kSecReturnData as String] = true
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(q as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else { throw keychainError() }
+        return try JSONDecoder().decode(StoredSession.self, from: data)
+    }
+    func save(_ value: StoredSession) throws {
+        let data = try JSONEncoder().encode(value)
+        let attributes: [String: Any] = [kSecValueData as String: data, kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
+        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            var q = query; attributes.forEach { q[$0.key] = $0.value }
+            guard SecItemAdd(q as CFDictionary, nil) == errSecSuccess else { throw keychainError() }
+        } else if status != errSecSuccess { throw keychainError() }
+    }
+    func remove() throws {
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else { throw keychainError() }
+    }
+    private func keychainError() -> APIError { APIError(code: "KEYCHAIN_UNAVAILABLE", message: "Could not access secure account storage. Unlock your device and try again.") }
+}
+
+@Observable final class AccountSession {
+    private(set) var stored: StoredSession?
+    private(set) var authenticating = false
+    let api: APIClient
+    private let secrets: any SessionPersistence
+    private var refreshTask: Task<StoredSession, any Error>?
+    private var generation = UUID()
+    var onCleared: (() -> Void)?
+    var user: User? { stored?.tokens.user }
+    init(api: APIClient, persistence: any SessionPersistence = KeychainSessionStore()) throws {
+        self.api = api; secrets = persistence; stored = try persistence.load()
+    }
+    func accept(_ tokens: Tokens) throws {
+        let next = StoredSession(tokens: tokens)
+        try secrets.save(next)
+        generation = UUID(); refreshTask?.cancel(); refreshTask = nil; stored = next
+    }
+    func clear() throws {
+        try secrets.remove()
+        generation = UUID(); refreshTask?.cancel(); refreshTask = nil; stored = nil
+        onCleared?()
+    }
+    func token(force: Bool = false) async throws -> String {
+        guard let current = stored else { throw APIError(code: "AUTH_REQUIRED", message: "Sign in to dictate.") }
+        if !force && current.accessExpiresAt.timeIntervalSinceNow > 30 { return current.tokens.accessToken }
+        if let refreshTask { return try await refreshTask.value.tokens.accessToken }
+        let expected = generation
+        let task = Task { () throws -> StoredSession in
+            let tokens = try await api.refresh(current.tokens.refreshToken)
+            guard generation == expected, tokens.user.id == current.tokens.user.id else { throw CancellationError() }
+            let next = StoredSession(tokens: tokens)
+            try secrets.save(next); stored = next
+            return next
+        }
+        refreshTask = task
+        defer { if generation == expected { refreshTask = nil } }
+        do { return try await task.value.tokens.accessToken }
+        catch let e as APIError where ["AUTH_REQUIRED", "SESSION_REVOKED", "INVALID_REFRESH_TOKEN"].contains(e.code) {
+            if generation == expected { try clear() }; throw e
+        }
+    }
+    func call<T>(_ operation: (String) async throws -> T) async throws -> T {
+        let expected = generation
+        let access = try await token()
+        guard generation == expected else { throw CancellationError() }
+        do {
+            let result = try await operation(access)
+            guard generation == expected else { throw CancellationError() }
+            return result
+        } catch let error as APIError where error.code == "TOKEN_EXPIRED" {
+            let replacement = try await token(force: true)
+            guard generation == expected else { throw CancellationError() }
+            let result = try await operation(replacement)
+            guard generation == expected else { throw CancellationError() }
+            return result
+        } catch let error as APIError where error.code == "AUTH_REQUIRED" || error.code == "SESSION_REVOKED" {
+            if generation == expected { try clear() }; throw error
+        }
+    }
+}
+
+final class WebAuthentication: NSObject, ASWebAuthenticationPresentationContextProviding {
+    private var session: ASWebAuthenticationSession?
+    func authenticate(base: URL, deletion: Bool = false) async throws -> (code: String, verifier: String) {
+        guard session == nil else { throw APIError(code: "AUTH_IN_PROGRESS", message: "A sign-in window is already open.") }
+        defer { session = nil }
+        let verifier = try random(48); let state = try random(32)
+        let challenge = Data(SHA256.hash(data: Data(verifier.utf8))).base64URL
+        var url = URLComponents(url: base.appendingPathComponent("auth"), resolvingAgainstBaseURL: false)!
+        url.queryItems = [.init(name: "platform", value: "ios"), .init(name: "code_challenge", value: challenge), .init(name: "state", value: state)]
+        if deletion { url.queryItems?.append(.init(name: "intent", value: "delete")) }
+        let callback: URL = try await withCheckedThrowingContinuation { continuation in
+            let completion: ASWebAuthenticationSession.CompletionHandler = { callback, error in
+                if let error { continuation.resume(throwing: error) }
+                else if let callback { continuation.resume(returning: callback) }
+                else { continuation.resume(throwing: APIError(code: "AUTH_CALLBACK", message: "Sign-in did not return a valid response.")) }
+            }
+            let web: ASWebAuthenticationSession
+            if #available(iOS 17.4, *) { web = ASWebAuthenticationSession(url: url.url!, callback: .customScheme("wovoice-ios"), completionHandler: completion) }
+            else { web = ASWebAuthenticationSession(url: url.url!, callbackURLScheme: "wovoice-ios", completionHandler: completion) }
+            web.presentationContextProvider = self; web.prefersEphemeralWebBrowserSession = true
+            session = web
+            if !web.start() { continuation.resume(throwing: APIError(code: "AUTH_PRESENTATION", message: "Could not open the sign-in window.")) }
+        }
+        guard callback.scheme == "wovoice-ios", callback.host == "callback", callback.path.isEmpty,
+              let components = URLComponents(url: callback, resolvingAgainstBaseURL: false),
+              components.queryItems?.filter({ $0.name == "state" }).map(\.value) == [state],
+              let code = components.queryItems?.first(where: { $0.name == (deletion ? "reauth_token" : "code") })?.value,
+              code.range(of: #"^[A-Za-z0-9._~-]{20,256}$"#, options: .regularExpression) != nil else {
+            throw APIError(code: "AUTH_CALLBACK", message: "The sign-in response could not be verified. Please try again.")
+        }
+        return (code, verifier)
+    }
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows).first(where: \.isKeyWindow) ?? ASPresentationAnchor()
+    }
+    private func random(_ count: Int) throws -> String {
+        var bytes = [UInt8](repeating: 0, count: count)
+        guard SecRandomCopyBytes(kSecRandomDefault, count, &bytes) == errSecSuccess else { throw APIError(code: "SECURE_RANDOM", message: "Could not start secure sign-in.") }
+        return Data(bytes).base64URL
+    }
+}
+private extension Data {
+    var base64URL: String { base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "") }
+}

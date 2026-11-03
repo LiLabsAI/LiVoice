@@ -1,0 +1,816 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		077455DD8623B2CBC058A101 /* KeyboardBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0944F8603E2C8E8B634BA985 /* KeyboardBridge.swift */; };
+		08A134640C6DCBC6DD90467E /* SessionWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4709752ECA9C03E716DBDAD /* SessionWidget.swift */; };
+		0ED7C495E9EE27B10E64F5E8 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B93A93CC9A783DF0F19DB33 /* DashboardView.swift */; };
+		33FE36DD85AE15660E4B15A9 /* AccountSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 808187CA0209A43D3011843B /* AccountSession.swift */; };
+		41E0C57DD90AF0F4C6D57677 /* WoVoiceCore in Frameworks */ = {isa = PBXBuildFile; productRef = 4AFBDBBECDA4F3E281BC7312 /* WoVoiceCore */; };
+		4B01302AA37A4787051F3631 /* WoVoiceApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62E9C94EA598296406B67B88 /* WoVoiceApp.swift */; };
+		500EF4EF0629E559B59617BE /* KeyboardBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0944F8603E2C8E8B634BA985 /* KeyboardBridge.swift */; };
+		53C11AF499E9B745F0F78EFE /* SessionActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F33407B56F5D8DA49A564B76 /* SessionActivity.swift */; };
+		65D8956449ECFD1EED73B877 /* WoVoiceCore in Frameworks */ = {isa = PBXBuildFile; productRef = 1AA173515062F750228E6C24 /* WoVoiceCore */; };
+		67C9819A68053C48D980AD82 /* KeyboardBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0944F8603E2C8E8B634BA985 /* KeyboardBridge.swift */; };
+		68DAFE882DFF07AACB9ACD0A /* AccountAndSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A66B3DD2DBF05BD366E579BA /* AccountAndSyncTests.swift */; };
+		7316F42367606C01D097CA72 /* SessionActivities.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC23614C5B4DF8DD067B1DF7 /* SessionActivities.swift */; };
+		744847704268CC1B169A52A3 /* WoVoiceWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CA0BA9F00EBFC575893C1C61 /* WoVoiceWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		751C051C19D5B54893C7E708 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 463F4DD0B167D423A216224C /* Assets.xcassets */; };
+		7A3256E904BF7713753E6BD4 /* KeyboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E4A0199A65064ADA8F3D6D3 /* KeyboardViewController.swift */; };
+		8644CFCD1DF831624BB351E5 /* SessionShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = E432B0AD47B5CC14F4FB1F30 /* SessionShortcuts.swift */; };
+		88AE160472C807F716269052 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = EEE3D0AE007A6715E5304D43 /* PrivacyInfo.xcprivacy */; };
+		928171449CB769D82A487AB6 /* AudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D277290D873292C9179EDE3 /* AudioCapture.swift */; };
+		9D08468A231F21354388DEE4 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = EEE3D0AE007A6715E5304D43 /* PrivacyInfo.xcprivacy */; };
+		A95A1D3D3F057F96DCDEE1C6 /* SessionActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F33407B56F5D8DA49A564B76 /* SessionActivity.swift */; };
+		AD826491D74C75F936C5FF0B /* SyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E1E99D7BBD40633FB4A3B65 /* SyncService.swift */; };
+		CD5E64069954AF97A38EAF2A /* DevelopmentFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14711F351034B12CE563F2D /* DevelopmentFixture.swift */; };
+		D0308A8BDD3C3A09F6BAFF8A /* WoVoiceKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A19A73D81659257187ECCF6C /* WoVoiceKeyboard.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		D583ED24688F76B4EE212282 /* WoVoiceCore in Frameworks */ = {isa = PBXBuildFile; productRef = 58B2580F20091DEC29E3FE43 /* WoVoiceCore */; };
+		E195735B77001B7935A2FE03 /* SessionActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F33407B56F5D8DA49A564B76 /* SessionActivity.swift */; };
+		E2AFD56317F636C4E5A6D73F /* WoVoiceCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8B6A77586C70E5AAA9913479 /* WoVoiceCore */; };
+		E766DC5B8244587A4330B441 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = EEE3D0AE007A6715E5304D43 /* PrivacyInfo.xcprivacy */; };
+		F58C7CEE1B5A40F4A8C5B6B0 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F278923603E5445AC9C3E9D /* AppModel.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		474B87AE76FFEA073D650C37 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7274A52CCCFE4426BDD867FC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E22E79A97BBF58E31EEF0F38;
+			remoteInfo = WoVoice;
+		};
+		C1B88682196FF74E9E7E13AE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7274A52CCCFE4426BDD867FC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BF4E6B9AB518E393F58204B1;
+			remoteInfo = WoVoiceWidgets;
+		};
+		CFE989EEAD13FE1B18143494 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7274A52CCCFE4426BDD867FC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4CCA5AA9D0DD01910BCC55ED;
+			remoteInfo = WoVoiceKeyboard;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		C52CBC35ECF09FE716D390D4 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				D0308A8BDD3C3A09F6BAFF8A /* WoVoiceKeyboard.appex in Embed Foundation Extensions */,
+				744847704268CC1B169A52A3 /* WoVoiceWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		03585E94EC094903F076627A /* Core */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Core; path = Core; sourceTree = SOURCE_ROOT; };
+		0944F8603E2C8E8B634BA985 /* KeyboardBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardBridge.swift; sourceTree = "<group>"; };
+		099573364DA29D6CC0A339A0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		192A270268B70C8FAF506DE8 /* WoVoice.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WoVoice.entitlements; sourceTree = "<group>"; };
+		2D277290D873292C9179EDE3 /* AudioCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCapture.swift; sourceTree = "<group>"; };
+		315D11BE7EE7DDFB131AE091 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		3F278923603E5445AC9C3E9D /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		463F4DD0B167D423A216224C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		4FA62D2951AF885F69C9BA5B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		62E9C94EA598296406B67B88 /* WoVoiceApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WoVoiceApp.swift; sourceTree = "<group>"; };
+		6B93A93CC9A783DF0F19DB33 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		6E1E99D7BBD40633FB4A3B65 /* SyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncService.swift; sourceTree = "<group>"; };
+		74BD7F6DFB21467B24C19097 /* WoVoiceKeyboard.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WoVoiceKeyboard.entitlements; sourceTree = "<group>"; };
+		808187CA0209A43D3011843B /* AccountSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSession.swift; sourceTree = "<group>"; };
+		9AC20979A0F5FC60F004A5A3 /* WoVoiceTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = WoVoiceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		9E4A0199A65064ADA8F3D6D3 /* KeyboardViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardViewController.swift; sourceTree = "<group>"; };
+		A19A73D81659257187ECCF6C /* WoVoiceKeyboard.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = WoVoiceKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A66B3DD2DBF05BD366E579BA /* AccountAndSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountAndSyncTests.swift; sourceTree = "<group>"; };
+		B4709752ECA9C03E716DBDAD /* SessionWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionWidget.swift; sourceTree = "<group>"; };
+		CA0BA9F00EBFC575893C1C61 /* WoVoiceWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = WoVoiceWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		CC23614C5B4DF8DD067B1DF7 /* SessionActivities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionActivities.swift; sourceTree = "<group>"; };
+		E432B0AD47B5CC14F4FB1F30 /* SessionShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionShortcuts.swift; sourceTree = "<group>"; };
+		EEE3D0AE007A6715E5304D43 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		F14711F351034B12CE563F2D /* DevelopmentFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevelopmentFixture.swift; sourceTree = "<group>"; };
+		F16595F3DFF0DBB3B49BBB28 /* WoVoice.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = WoVoice.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F33407B56F5D8DA49A564B76 /* SessionActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionActivity.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		5149A4B2DC4AF06AFF9196CC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E2AFD56317F636C4E5A6D73F /* WoVoiceCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5D772084D8E2A7A81E45B877 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				41E0C57DD90AF0F4C6D57677 /* WoVoiceCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		806B04EB43EA320833EFC940 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				65D8956449ECFD1EED73B877 /* WoVoiceCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FD16CDE85367600AE26AA85B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D583ED24688F76B4EE212282 /* WoVoiceCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		02D146F7851473FDC0F5C4DB /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				A66B3DD2DBF05BD366E579BA /* AccountAndSyncTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		161DB1F12C9D5CE5356892F2 /* Widgets */ = {
+			isa = PBXGroup;
+			children = (
+				4FA62D2951AF885F69C9BA5B /* Info.plist */,
+				B4709752ECA9C03E716DBDAD /* SessionWidget.swift */,
+			);
+			path = Widgets;
+			sourceTree = "<group>";
+		};
+		3F8215CAA4E9D77C911C19C9 = {
+			isa = PBXGroup;
+			children = (
+				47AEC81B2B7518071B909E2D /* App */,
+				6AE64A107B23B52D9C023F60 /* Keyboard */,
+				D2AAE1DF22B26AF32FF87EE4 /* Packages */,
+				9CBA561EB2C3731D0CC8A828 /* Shared */,
+				02D146F7851473FDC0F5C4DB /* Tests */,
+				161DB1F12C9D5CE5356892F2 /* Widgets */,
+				D44B863AFA23F91C6A94593D /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		47AEC81B2B7518071B909E2D /* App */ = {
+			isa = PBXGroup;
+			children = (
+				808187CA0209A43D3011843B /* AccountSession.swift */,
+				3F278923603E5445AC9C3E9D /* AppModel.swift */,
+				463F4DD0B167D423A216224C /* Assets.xcassets */,
+				2D277290D873292C9179EDE3 /* AudioCapture.swift */,
+				6B93A93CC9A783DF0F19DB33 /* DashboardView.swift */,
+				F14711F351034B12CE563F2D /* DevelopmentFixture.swift */,
+				315D11BE7EE7DDFB131AE091 /* Info.plist */,
+				CC23614C5B4DF8DD067B1DF7 /* SessionActivities.swift */,
+				E432B0AD47B5CC14F4FB1F30 /* SessionShortcuts.swift */,
+				6E1E99D7BBD40633FB4A3B65 /* SyncService.swift */,
+				192A270268B70C8FAF506DE8 /* WoVoice.entitlements */,
+				62E9C94EA598296406B67B88 /* WoVoiceApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		6AE64A107B23B52D9C023F60 /* Keyboard */ = {
+			isa = PBXGroup;
+			children = (
+				099573364DA29D6CC0A339A0 /* Info.plist */,
+				9E4A0199A65064ADA8F3D6D3 /* KeyboardViewController.swift */,
+				74BD7F6DFB21467B24C19097 /* WoVoiceKeyboard.entitlements */,
+			);
+			path = Keyboard;
+			sourceTree = "<group>";
+		};
+		9CBA561EB2C3731D0CC8A828 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				0944F8603E2C8E8B634BA985 /* KeyboardBridge.swift */,
+				EEE3D0AE007A6715E5304D43 /* PrivacyInfo.xcprivacy */,
+				F33407B56F5D8DA49A564B76 /* SessionActivity.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		D2AAE1DF22B26AF32FF87EE4 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				03585E94EC094903F076627A /* Core */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		D44B863AFA23F91C6A94593D /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				F16595F3DFF0DBB3B49BBB28 /* WoVoice.app */,
+				A19A73D81659257187ECCF6C /* WoVoiceKeyboard.appex */,
+				9AC20979A0F5FC60F004A5A3 /* WoVoiceTests.xctest */,
+				CA0BA9F00EBFC575893C1C61 /* WoVoiceWidgets.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0128C8BFC56616ED69C5A521 /* WoVoiceTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4FB29B793272E87934B82A35 /* Build configuration list for PBXNativeTarget "WoVoiceTests" */;
+			buildPhases = (
+				5A9E6B53F5D7F41FB73A8E4C /* Sources */,
+				5149A4B2DC4AF06AFF9196CC /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				765E6831EB715EADF666E274 /* PBXTargetDependency */,
+			);
+			name = WoVoiceTests;
+			packageProductDependencies = (
+				8B6A77586C70E5AAA9913479 /* WoVoiceCore */,
+			);
+			productName = WoVoiceTests;
+			productReference = 9AC20979A0F5FC60F004A5A3 /* WoVoiceTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		4CCA5AA9D0DD01910BCC55ED /* WoVoiceKeyboard */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4789D242CE7878FC235D0E9D /* Build configuration list for PBXNativeTarget "WoVoiceKeyboard" */;
+			buildPhases = (
+				FE3F54AED46A819172273937 /* Sources */,
+				2F654C79F509AAC70BA038AA /* Resources */,
+				FD16CDE85367600AE26AA85B /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WoVoiceKeyboard;
+			packageProductDependencies = (
+				58B2580F20091DEC29E3FE43 /* WoVoiceCore */,
+			);
+			productName = WoVoiceKeyboard;
+			productReference = A19A73D81659257187ECCF6C /* WoVoiceKeyboard.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		BF4E6B9AB518E393F58204B1 /* WoVoiceWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F9B62E809ABEF5AB30683DB4 /* Build configuration list for PBXNativeTarget "WoVoiceWidgets" */;
+			buildPhases = (
+				699D760C347E87BEC35FA8F2 /* Sources */,
+				E35DD4DFE29120CB182CAA20 /* Resources */,
+				5D772084D8E2A7A81E45B877 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WoVoiceWidgets;
+			packageProductDependencies = (
+				4AFBDBBECDA4F3E281BC7312 /* WoVoiceCore */,
+			);
+			productName = WoVoiceWidgets;
+			productReference = CA0BA9F00EBFC575893C1C61 /* WoVoiceWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		E22E79A97BBF58E31EEF0F38 /* WoVoice */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 120A2B95D4290D48B5DBCD8C /* Build configuration list for PBXNativeTarget "WoVoice" */;
+			buildPhases = (
+				3E2968158CE1118F40978CFB /* Sources */,
+				0217CE66D05B327AE624DCB8 /* Resources */,
+				806B04EB43EA320833EFC940 /* Frameworks */,
+				C52CBC35ECF09FE716D390D4 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				0BA5AB8D00DC67C5DF7AD321 /* PBXTargetDependency */,
+				0DB4DFA97BD27A3AA5FEDA88 /* PBXTargetDependency */,
+			);
+			name = WoVoice;
+			packageProductDependencies = (
+				1AA173515062F750228E6C24 /* WoVoiceCore */,
+			);
+			productName = WoVoice;
+			productReference = F16595F3DFF0DBB3B49BBB28 /* WoVoice.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		7274A52CCCFE4426BDD867FC /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2720;
+				TargetAttributes = {
+					0128C8BFC56616ED69C5A521 = {
+						ProvisioningStyle = Automatic;
+					};
+					4CCA5AA9D0DD01910BCC55ED = {
+						ProvisioningStyle = Automatic;
+					};
+					BF4E6B9AB518E393F58204B1 = {
+						ProvisioningStyle = Automatic;
+					};
+					E22E79A97BBF58E31EEF0F38 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 3CF00F86071FCF80948DDE9D /* Build configuration list for PBXProject "WoVoice" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 3F8215CAA4E9D77C911C19C9;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C2DAB6FF87C382533BAC0271 /* XCLocalSwiftPackageReference "Core" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = D44B863AFA23F91C6A94593D /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				E22E79A97BBF58E31EEF0F38 /* WoVoice */,
+				BF4E6B9AB518E393F58204B1 /* WoVoiceWidgets */,
+				4CCA5AA9D0DD01910BCC55ED /* WoVoiceKeyboard */,
+				0128C8BFC56616ED69C5A521 /* WoVoiceTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		0217CE66D05B327AE624DCB8 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				751C051C19D5B54893C7E708 /* Assets.xcassets in Resources */,
+				9D08468A231F21354388DEE4 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2F654C79F509AAC70BA038AA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E766DC5B8244587A4330B441 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E35DD4DFE29120CB182CAA20 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				88AE160472C807F716269052 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		3E2968158CE1118F40978CFB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				33FE36DD85AE15660E4B15A9 /* AccountSession.swift in Sources */,
+				F58C7CEE1B5A40F4A8C5B6B0 /* AppModel.swift in Sources */,
+				928171449CB769D82A487AB6 /* AudioCapture.swift in Sources */,
+				0ED7C495E9EE27B10E64F5E8 /* DashboardView.swift in Sources */,
+				CD5E64069954AF97A38EAF2A /* DevelopmentFixture.swift in Sources */,
+				500EF4EF0629E559B59617BE /* KeyboardBridge.swift in Sources */,
+				7316F42367606C01D097CA72 /* SessionActivities.swift in Sources */,
+				E195735B77001B7935A2FE03 /* SessionActivity.swift in Sources */,
+				8644CFCD1DF831624BB351E5 /* SessionShortcuts.swift in Sources */,
+				AD826491D74C75F936C5FF0B /* SyncService.swift in Sources */,
+				4B01302AA37A4787051F3631 /* WoVoiceApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5A9E6B53F5D7F41FB73A8E4C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				68DAFE882DFF07AACB9ACD0A /* AccountAndSyncTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		699D760C347E87BEC35FA8F2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				077455DD8623B2CBC058A101 /* KeyboardBridge.swift in Sources */,
+				A95A1D3D3F057F96DCDEE1C6 /* SessionActivity.swift in Sources */,
+				08A134640C6DCBC6DD90467E /* SessionWidget.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FE3F54AED46A819172273937 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				67C9819A68053C48D980AD82 /* KeyboardBridge.swift in Sources */,
+				7A3256E904BF7713753E6BD4 /* KeyboardViewController.swift in Sources */,
+				53C11AF499E9B745F0F78EFE /* SessionActivity.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0BA5AB8D00DC67C5DF7AD321 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4CCA5AA9D0DD01910BCC55ED /* WoVoiceKeyboard */;
+			targetProxy = CFE989EEAD13FE1B18143494 /* PBXContainerItemProxy */;
+		};
+		0DB4DFA97BD27A3AA5FEDA88 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BF4E6B9AB518E393F58204B1 /* WoVoiceWidgets */;
+			targetProxy = C1B88682196FF74E9E7E13AE /* PBXContainerItemProxy */;
+		};
+		765E6831EB715EADF666E274 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E22E79A97BBF58E31EEF0F38 /* WoVoice */;
+			targetProxy = 474B87AE76FFEA073D650C37 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		09865E6E346DEAABE2C9EFB0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				"CODE_SIGN_IDENTITY[sdk=iphonesimulator*]" = "-";
+				CODE_SIGN_STYLE = Automatic;
+				"CODE_SIGN_STYLE[sdk=iphonesimulator*]" = Manual;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				WOVOICE_APP_GROUP = group.com.aliahad.wovoice.ios;
+			};
+			name = Debug;
+		};
+		374150F8820000EFD1DF3EE4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Keyboard/WoVoiceKeyboard.entitlements;
+				INFOPLIST_FILE = Keyboard/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.aliahad.wovoice.ios.keyboard;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		479540E74B22613772EF3680 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/WoVoice.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.aliahad.wovoice.ios;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		4CA64450E30B8E46C8DE81C7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				"CODE_SIGN_IDENTITY[sdk=iphonesimulator*]" = "-";
+				CODE_SIGN_STYLE = Automatic;
+				"CODE_SIGN_STYLE[sdk=iphonesimulator*]" = Manual;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				WOVOICE_APP_GROUP = group.com.aliahad.wovoice.ios;
+			};
+			name = Release;
+		};
+		5E95CE0A76987D4741CB47E8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Keyboard/WoVoiceKeyboard.entitlements;
+				INFOPLIST_FILE = Widgets/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.aliahad.wovoice.ios.widgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		7CD8CD8D20B62C6FC99342D2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.aliahad.wovoice.ios.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WoVoice.app/WoVoice";
+			};
+			name = Debug;
+		};
+		850627B06D25CC2D635D92BC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Keyboard/WoVoiceKeyboard.entitlements;
+				INFOPLIST_FILE = Keyboard/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.aliahad.wovoice.ios.keyboard;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		B06FD4753B6227FC96D1AD8D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Keyboard/WoVoiceKeyboard.entitlements;
+				INFOPLIST_FILE = Widgets/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.aliahad.wovoice.ios.widgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		B917B6FAE756F76D576ED691 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.aliahad.wovoice.ios.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WoVoice.app/WoVoice";
+			};
+			name = Release;
+		};
+		E6BDC1A655C98ABFBAD98CAD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/WoVoice.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.aliahad.wovoice.ios;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		120A2B95D4290D48B5DBCD8C /* Build configuration list for PBXNativeTarget "WoVoice" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				479540E74B22613772EF3680 /* Debug */,
+				E6BDC1A655C98ABFBAD98CAD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		3CF00F86071FCF80948DDE9D /* Build configuration list for PBXProject "WoVoice" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				09865E6E346DEAABE2C9EFB0 /* Debug */,
+				4CA64450E30B8E46C8DE81C7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		4789D242CE7878FC235D0E9D /* Build configuration list for PBXNativeTarget "WoVoiceKeyboard" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				374150F8820000EFD1DF3EE4 /* Debug */,
+				850627B06D25CC2D635D92BC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		4FB29B793272E87934B82A35 /* Build configuration list for PBXNativeTarget "WoVoiceTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7CD8CD8D20B62C6FC99342D2 /* Debug */,
+				B917B6FAE756F76D576ED691 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F9B62E809ABEF5AB30683DB4 /* Build configuration list for PBXNativeTarget "WoVoiceWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5E95CE0A76987D4741CB47E8 /* Debug */,
+				B06FD4753B6227FC96D1AD8D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		C2DAB6FF87C382533BAC0271 /* XCLocalSwiftPackageReference "Core" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Core;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1AA173515062F750228E6C24 /* WoVoiceCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = WoVoiceCore;
+		};
+		4AFBDBBECDA4F3E281BC7312 /* WoVoiceCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = WoVoiceCore;
+		};
+		58B2580F20091DEC29E3FE43 /* WoVoiceCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = WoVoiceCore;
+		};
+		8B6A77586C70E5AAA9913479 /* WoVoiceCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = WoVoiceCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 7274A52CCCFE4426BDD867FC /* Project object */;
+}

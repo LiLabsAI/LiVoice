@@ -1,0 +1,401 @@
+import AVFAudio
+import ActivityKit
+import AuthenticationServices
+import Foundation
+import Observation
+import UIKit
+import WoVoiceCore
+
+@Observable final class AppModel {
+    let account: AccountSession
+    let store: RecordStore
+    private let auth = WebAuthentication()
+    private let audio: any CaptureEngine
+    private let bridge = KeyboardBridge()
+    private let syncService: SyncService
+    var profile: Profile?
+    var history: [CloudRecord] = []
+    var dictionary: [CloudRecord] = []
+    var analytics: [CloudRecord] = []
+    var cloudSettings = CloudSettings()
+    var preferences = ContextPreferences()
+    var status = KeyboardStatus()
+    var message: String?
+    var busy = false
+    var syncing = false
+    var lastText = ""
+    var haptics = true
+    var animations = true
+    var waveform = true
+    var keepHistory = true
+    var costEstimates = true
+    var learning = true
+    var sessions: [DeviceSession] = []
+    var undoRecord: CloudRecord?
+    private var undoTask: Task<Void, Never>?
+    private var undoOwner: String?
+    private var sessionKeyboard = false
+    private var activityID: String?
+    private var activityPhase = ""
+    private var loop: Task<Void, Never>?
+    private var upload: Task<Void, Never>?
+    private var generation = UUID()
+    private var keyboardRequest = false
+    private var currentContext: DictationContext?
+    private var sentenceStart = true
+    private var retryAudio: (wav: Data, duration: Double, expiresAt: Date, attempts: Int)?
+    private var observers: [NSObjectProtocol] = []
+    private var loadedOwner: String?
+    var owner: String? { account.user?.id }
+    var recording: Bool { status.phase == "recording" }
+    var keyboardSessionActive: Bool { sessionKeyboard && audio.active && status.expiresAt > .now }
+
+    init(api: APIClient = APIClient(), persistence: any SessionPersistence = KeychainSessionStore(), capture: any CaptureEngine = AudioCapture(), databaseURL: URL? = nil) throws {
+        audio = capture
+        let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: directory.path)
+        var resources = URLResourceValues(); resources.isExcludedFromBackup = true
+        var local = directory; try local.setResourceValues(resources)
+        store = try RecordStore(url: databaseURL ?? directory.appendingPathComponent("wovoice.sqlite"))
+        account = try AccountSession(api: api, persistence: persistence)
+        syncService = SyncService(account: account, store: store)
+        try reload()
+        account.onCleared = { [weak self] in
+            guard let self else { return }
+            stopSession()
+            do { try reload() } catch { message = error.localizedDescription }
+        }
+        _ = bridge.drainCommands()
+        bridge.remove("status.json")
+        observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] notification in
+            guard (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == AVAudioSession.InterruptionType.began.rawValue else { return }
+            Task { @MainActor in self?.stopSession(message: "Audio was interrupted. Start a new session when ready.") }
+        })
+        observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] notification in
+            let reason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            guard reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue || reason == AVAudioSession.RouteChangeReason.newDeviceAvailable.rawValue else { return }
+            Task { @MainActor in self?.stopSession(message: "The audio device changed. Start a new session to use it.") }
+        })
+        observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.stopSession(message: "Audio services restarted. Start a new session when ready.") }
+        })
+    }
+    isolated deinit {
+        loop?.cancel(); upload?.cancel(); undoTask?.cancel(); audio.stopSession()
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+    }
+    func reload() throws {
+        if loadedOwner != owner { lastText = ""; profile = nil; sessions = []; loadedOwner = owner }
+        if undoOwner != owner { undoTask?.cancel(); undoRecord = nil; undoOwner = nil }
+        guard let owner else {
+            history = []; dictionary = []; analytics = []; preferences = .init(); cloudSettings = .init(); return
+        }
+        history = try store.records(owner: owner, type: .history).sorted { ($0.payload?["createdAtMs"]?.number ?? 0) > ($1.payload?["createdAtMs"]?.number ?? 0) }
+        dictionary = try store.records(owner: owner, type: .dictionary).sorted { ($0.payload?["term"]?.string ?? "") < ($1.payload?["term"]?.string ?? "") }
+        analytics = try store.records(owner: owner, type: .analytics)
+        preferences = try store.metadata("context", owner: owner, default: ContextPreferences())
+        cloudSettings = try store.metadata("cloudSettings", owner: owner, default: CloudSettings())
+        haptics = try store.metadata("haptics", owner: owner, default: true)
+        animations = try store.metadata("animations", owner: owner, default: true)
+        waveform = try store.metadata("waveform", owner: owner, default: true)
+        keepHistory = try store.metadata("keepHistory", owner: owner, default: true)
+        costEstimates = try store.metadata("costEstimates", owner: owner, default: true)
+        learning = try store.metadata("learning", owner: owner, default: true)
+    }
+    func signIn() async {
+        guard !busy else { return }; busy = true; defer { busy = false }
+        do {
+            let result = try await auth.authenticate(base: account.api.baseURL)
+            let tokens = try await account.api.exchange(code: result.code, verifier: result.verifier, device: "iOS — \(UIDevice.current.model)")
+            stopSession()
+            try account.accept(tokens); try reload(); await refreshProfile(); await sync()
+        } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin { }
+        catch { message = error.localizedDescription }
+    }
+    func refreshProfile() async {
+        guard owner != nil else { return }
+        do { profile = try await account.call { try await account.api.request("/v1/me", token: $0) }
+            if profile?.user.accountStatus.state != "active" { stopSession(message: profile?.user.accountStatus.publicMessage ?? "This account cannot dictate right now.") }
+        } catch is CancellationError { }
+        catch { message = error.localizedDescription; if owner == nil { stopSession(); try? reload() } }
+    }
+    func logout() async {
+        stopSession(); busy = true; defer { busy = false }
+        do {
+            try await account.call { try await account.api.empty("/v1/auth/logout", method: "POST", token: $0, body: [:]) }
+            try account.clear(); profile = nil; lastText = ""; try reload()
+        } catch { message = error.localizedDescription }
+    }
+    func deleteAccount() async {
+        stopSession(); busy = true; defer { busy = false }
+        do {
+            guard let expected = owner else { return }
+            let verification = try await auth.authenticate(base: account.api.baseURL, deletion: true)
+            guard owner == expected else { throw CancellationError() }
+            try await account.call { try await account.api.empty("/v1/me", method: "DELETE", token: $0, body: ["reauthToken": .string(verification.code)]) }
+            try store.removeAll(owner: expected); try account.clear(); profile = nil; lastText = ""; try reload()
+        } catch { message = error.localizedDescription }
+    }
+    func loadSessions() async {
+        nonisolated struct Response: Decodable, Sendable { let sessions: [DeviceSession] }
+        do {
+            let result: Response = try await account.call { try await account.api.request("/v1/me/sessions", token: $0) }
+            sessions = result.sessions
+        } catch { message = error.localizedDescription }
+    }
+    func revoke(_ device: DeviceSession) async {
+        do {
+            let id = device.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? device.id
+            try await account.call { try await account.api.empty("/v1/me/sessions/\(id)", method: "DELETE", token: $0) }
+            if device.current == 1 { stopSession(); try account.clear(); try reload() }
+            await loadSessions()
+        } catch { message = error.localizedDescription }
+    }
+    func clearLocalData() async {
+        stopSession()
+        do {
+            if owner != nil { try await account.call { try await account.api.empty("/v1/auth/logout", method: "POST", token: $0, body: [:]) } }
+            try account.clear(); try store.removeAllAccounts(); profile = nil; lastText = ""; try reload()
+        } catch { message = error.localizedDescription }
+    }
+    func sync() async {
+        guard owner != nil, !syncing else { return }; syncing = true; defer { syncing = false }
+        do { try await syncService.run(); try reload() }
+        catch is CancellationError { }
+        catch { message = error.localizedDescription }
+    }
+    func updateCloud(history: Bool, retention: Int?) async {
+        do {
+            guard let expected = owner else { return }
+            let settings = try await account.call { try await account.api.updateSettings(token: $0, history: history, retention: retention) }
+            guard owner == expected else { return }
+            try store.applySettings(owner: expected, settings: settings); try reload(); await sync()
+        } catch { message = error.localizedDescription }
+    }
+    func savePreferences() {
+        guard let owner else { return }
+        do {
+            try store.setMetadata("context", owner: owner, value: preferences)
+            try store.setMetadata("haptics", owner: owner, value: haptics)
+            try store.setMetadata("animations", owner: owner, value: animations)
+            try store.setMetadata("waveform", owner: owner, value: waveform)
+            try store.setMetadata("keepHistory", owner: owner, value: keepHistory)
+            try store.setMetadata("costEstimates", owner: owner, value: costEstimates)
+            try store.setMetadata("learning", owner: owner, value: learning)
+            publish()
+        } catch { message = error.localizedDescription }
+    }
+    func addTerm(_ input: String) {
+        guard let owner else { return }
+        let term = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (1...80).contains(term.utf16.count) else { message = "Use a word or phrase of up to 80 characters."; return }
+        do {
+            if dictionary.contains(where: { $0.payload?["normalizedTerm"]?.string == term.lowercased() }) { return }
+            try store.save(owner: owner, record: .init(id: UUID().uuidString, type: .dictionary, payload: RecordPayload.dictionary(term)))
+            try reload(); Task { await sync() }
+        } catch { message = error.localizedDescription }
+    }
+    func delete(_ record: CloudRecord) {
+        guard let owner else { return }
+        do {
+            try store.delete(owner: owner, record: record, holdUntil: .now.addingTimeInterval(5))
+            undoRecord = record; undoOwner = owner; try reload()
+            undoTask?.cancel()
+            undoTask = Task {
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled, self.owner == owner else { return }
+                undoRecord = nil; await sync()
+            }
+        }
+        catch { message = error.localizedDescription }
+    }
+    func undoDelete() {
+        guard let owner, owner == undoOwner, let record = undoRecord else { return }
+        do { try store.restore(owner: owner, original: record); undoTask?.cancel(); undoRecord = nil; try reload(); Task { await sync() } }
+        catch { message = error.localizedDescription }
+    }
+    func updateTerm(_ entry: CloudRecord, term: String, confirmed: Bool = true) {
+        guard let owner else { return }
+        let value = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (1...80).contains(value.utf16.count) else { message = "Use a word or phrase of up to 80 characters."; return }
+        if dictionary.contains(where: { $0.id != entry.id && $0.payload?["normalizedTerm"]?.string == value.lowercased() }) { message = "That word is already in your vocabulary."; return }
+        do {
+            var updated = entry; updated.payload?["term"] = .string(value); updated.payload?["normalizedTerm"] = .string(value.lowercased())
+            if confirmed { updated.payload?["status"] = .string("confirmed") }
+            try store.save(owner: owner, record: updated); try reload(); Task { await sync() }
+        } catch { message = error.localizedDescription }
+    }
+    private func suggestion(_ term: String?, recordID: String?) {
+        guard learning, let owner, let term, (2...80).contains(term.utf16.count), !dictionary.contains(where: { $0.payload?["normalizedTerm"]?.string == term.lowercased() }) else { return }
+        do {
+            try store.transaction {
+                try store.save(owner: owner, record: .init(id: UUID().uuidString, type: .dictionary, payload: RecordPayload.dictionary(term, status: "suggested", source: "learned")))
+                if var event = analytics.first(where: { $0.id == recordID }) { event.payload?["corrected"] = .bool(true); try store.save(owner: owner, record: event) }
+            }
+            try reload(); Task { await sync() }
+        } catch { message = error.localizedDescription }
+    }
+    func clear(_ type: RecordType) {
+        guard let owner else { return }
+        do { try store.transaction { for record in try store.records(owner: owner, type: type) { try store.delete(owner: owner, record: record) } }; try reload(); Task { await sync() } }
+        catch { message = error.localizedDescription }
+    }
+    func startSession(keyboard: Bool = true) async {
+        guard !busy, !audio.active else { return }
+        guard let owner else { message = "Sign in before starting dictation."; return }
+        if let profile, profile.user.accountStatus.state != "active" { message = profile.user.accountStatus.publicMessage ?? "This account cannot dictate."; return }
+        busy = true; defer { busy = false }
+        let expected = generation
+        do {
+            try await audio.startSession()
+            guard self.owner == owner, generation == expected else { audio.stopSession(); return }
+            sessionKeyboard = keyboard
+            status.owner = owner; status.expiresAt = .now.addingTimeInterval(keyboard ? 300 : 120); status.phase = "ready"
+            status.message = "Keyboard session ready · microphone active"; status.result = nil
+            _ = bridge.drainCommands()
+            if keyboard, ActivityAuthorizationInfo().areActivitiesEnabled {
+                let content = ActivityContent(state: SessionActivityAttributes.ContentState(expiresAt: status.expiresAt, phase: "Microphone active · Ready"), staleDate: status.expiresAt)
+                activityID = (try? Activity.request(attributes: SessionActivityAttributes(), content: content, pushType: nil))?.id
+                activityPhase = status.phase
+            }
+            loop?.cancel()
+            loop = Task { [weak self] in
+                while !Task.isCancelled {
+                    self?.tick()
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+            }
+            publish()
+        } catch { audio.stopSession(); message = error.localizedDescription }
+    }
+    func stopSession(message: String? = nil) {
+        generation = UUID(); upload?.cancel(); upload = nil; retryAudio = nil
+        loop?.cancel(); loop = nil; audio.stopSession(); currentContext = nil
+        if let id = activityID { Task { await SessionActivities.end(id: id) } }
+        activityID = nil
+        status = KeyboardStatus(); status.message = message ?? "Open WoVoice to start a keyboard session."
+        _ = bridge.drainCommands(); publish()
+    }
+    func toggleRecording() {
+        if recording { finish() }
+        else if status.phase != "processing" { begin(request: UUID(), fromKeyboard: false, context: nil, sentenceStart: true) }
+    }
+    private func begin(request: UUID, fromKeyboard: Bool, context: DictationContext?, sentenceStart: Bool) {
+        guard audio.active, status.phase != "processing", !recording else { return }
+        generation = UUID(); retryAudio = nil; currentContext = context ?? DictationContext.capture(preferences: preferences, field: .text, before: nil, after: nil); self.sentenceStart = sentenceStart; keyboardRequest = fromKeyboard
+        status.request = request; status.result = nil
+        do { try audio.begin(); status.phase = "recording"; status.message = "Listening…"; publish() }
+        catch { status.phase = "error"; status.message = error.localizedDescription; publish() }
+    }
+    func cancelRecording() {
+        generation = UUID(); upload?.cancel(); upload = nil; audio.cancel(); retryAudio = nil; currentContext = nil
+        status.phase = "ready"; status.message = "Ready · microphone active"; status.result = nil; status.request = nil; publish()
+        if !sessionKeyboard { stopSession() }
+    }
+    private func finish() {
+        guard recording else { return }
+        do {
+            let recording = try audio.finish()
+            retryAudio = (recording.wav, recording.duration, .now.addingTimeInterval(60), 0)
+            if !sessionKeyboard { audio.stopSession(); status.expiresAt = .now.addingTimeInterval(100) }
+            transcribe()
+        } catch { status.phase = "error"; status.message = error.localizedDescription; currentContext = nil; if !sessionKeyboard { audio.stopSession() }; publish() }
+    }
+    func retry() {
+        guard let retryAudio, retryAudio.expiresAt > .now, retryAudio.attempts < 2 else { cancelRecording(); return }
+        self.retryAudio = (retryAudio.wav, retryAudio.duration, retryAudio.expiresAt, retryAudio.attempts + 1)
+        transcribe()
+    }
+    private func transcribe() {
+        guard let capture = retryAudio, let expectedOwner = owner, let request = status.request else { return }
+        let expected = generation
+        status.phase = "processing"; status.message = "Thinking…"; publish()
+        upload = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let vocabulary = dictionary.filter { $0.payload?["status"]?.string == "confirmed" }.sorted {
+                    let left = $0.payload?["lastUsedAtMs"]?.number ?? 0; let right = $1.payload?["lastUsedAtMs"]?.number ?? 0
+                    if left != right { return left > right }
+                    return ($0.payload?["createdAtMs"]?.number ?? 0) > ($1.payload?["createdAtMs"]?.number ?? 0)
+                }.prefix(100)
+                let glossary = vocabulary.compactMap { $0.payload?["term"]?.string }
+                let result = try await account.call { token in
+                    // Consent is read again for each network attempt, including token refresh.
+                    try await account.api.transcribe(token: token, wav: capture.wav, glossary: glossary,
+                                                     context: currentContext?.restricted(to: preferences.level), sentenceStart: sentenceStart)
+                }
+                guard !Task.isCancelled, generation == expected, owner == expectedOwner, status.request == request else { return }
+                let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { throw APIError(code: "NO_SPEECH", message: "No speech detected. Please try again.") }
+                let payload = RecordPayload.history(result, durationMs: capture.duration * 1000)
+                try store.transaction {
+                    if keepHistory { try store.save(owner: expectedOwner, record: .init(id: result.requestId, type: .history, payload: payload)) }
+                    try store.save(owner: expectedOwner, record: .init(id: result.requestId, type: .analytics, payload: RecordPayload.analytics(history: payload)))
+                    for previousEntry in vocabulary {
+                        guard var entry = try store.record(owner: expectedOwner, type: .dictionary, id: previousEntry.id),
+                              !entry.deleted, entry.payload?["normalizedTerm"] == previousEntry.payload?["normalizedTerm"],
+                              entry.payload?["status"]?.string == "confirmed", let term = entry.payload?["term"]?.string else { continue }
+                        let pattern = "(?<![\\p{L}\\p{N}])" + NSRegularExpression.escapedPattern(for: term) + "(?![\\p{L}\\p{N}])"
+                        if text.range(of: pattern, options: [.regularExpression,.caseInsensitive]) != nil {
+                            entry.payload?["lastUsedAtMs"] = .number(Date.now.timeIntervalSince1970*1000)
+                            let useCount = (entry.payload?["useCount"]?.number ?? 0)+1
+                            entry.payload?["useCount"] = .number(useCount)
+                            try store.save(owner: expectedOwner, record: entry)
+                        }
+                    }
+                }
+                try reload(); lastText = text
+                status.phase = keyboardRequest ? "result" : "ready"; status.message = keyboardRequest ? "Dictation ready" : "Ready · microphone active"
+                status.result = keyboardRequest ? text : nil; status.resultExpiresAt = .now.addingTimeInterval(30)
+                status.recordID = result.requestId
+                retryAudio = nil; currentContext = nil; publish()
+                if !sessionKeyboard { upload = nil; stopSession() }
+                await sync(); await refreshProfile()
+            } catch is CancellationError { }
+            catch {
+                guard generation == expected, owner == expectedOwner else { return }
+                status.phase = "error"; status.message = error.localizedDescription
+                if let error = error as? APIError, error.retryable, (capture.attempts < 2), (capture.expiresAt > .now) {
+                    retryAudio = (capture.wav, capture.duration, capture.expiresAt, capture.attempts)
+                } else { retryAudio = nil; currentContext = nil }
+                publish()
+            }
+        }
+    }
+    private func tick() {
+        guard owner == status.owner, audio.active || (!sessionKeyboard && (status.phase == "processing" || status.phase == "error")) else { stopSession(); return }
+        guard status.expiresAt > .now else { stopSession(message: "Keyboard session ended after five minutes. Open WoVoice to start again."); return }
+        let meter = audio.meter; status.level = meter.level; status.elapsed = meter.duration
+        if recording && meter.duration >= 60 { finish() }
+        if let expiry = status.resultExpiresAt, expiry <= .now { status.result = nil; status.resultExpiresAt = nil; if status.phase == "result" { status.phase = "ready" } }
+        if let retryAudio, retryAudio.expiresAt <= .now { self.retryAudio = nil; currentContext = nil }
+        for command in bridge.drainCommands() {
+            if command.owner == owner, abs(command.createdAt.timeIntervalSinceNow) < 3 {
+                switch command.action {
+                case .start: begin(request: command.request, fromKeyboard: true, context: command.context, sentenceStart: command.sentenceStart)
+                case .finish: if command.request == status.request { finish() }
+                case .retry: if command.request == status.request { retry() }
+                case .cancel: if command.request == status.request { cancelRecording() }
+                case .acknowledge: if command.request == status.request { status.result = nil; status.request = nil; status.phase = "ready" }
+                case .suggest: suggestion(command.suggestion, recordID: command.recordID)
+                case .endSession: stopSession(); return
+                }
+            }
+        }
+        publish()
+    }
+    private func publish() {
+        status.heartbeat = .now; status.preferences = preferences; status.haptics = haptics; status.animate = animations; status.waveform = waveform; status.learning = learning
+        status.canRetry = retryAudio.map { $0.expiresAt > .now && $0.attempts < 2 } ?? false
+        var outgoing = status
+        if let activityID, activityPhase != status.phase {
+            activityPhase = status.phase
+            let phase = recording ? "Recording dictation" : status.phase == "processing" ? "Processing dictation" : "Microphone active · Ready"
+            let expiry = status.expiresAt
+            Task { await SessionActivities.update(id: activityID, expires: expiry, phase: phase) }
+        }
+        if !sessionKeyboard { outgoing = KeyboardStatus() }
+        do { try bridge.write(outgoing, name: "status.json") }
+        catch { if audio.active { message = error.localizedDescription } }
+    }
+}
