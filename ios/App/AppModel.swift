@@ -329,6 +329,7 @@ import WoVoiceCore
         } catch { status.phase = "error"; status.message = error.localizedDescription; currentContext = nil; if !sessionKeyboard { audio.stopSession() }; publish() }
     }
     func retry() {
+        guard status.phase == "error" else { return }
         guard let retryAudio, retryAudio.expiresAt > .now, retryAudio.attempts < 2 else { cancelRecording(); return }
         self.retryAudio = (retryAudio.wav, retryAudio.duration, retryAudio.expiresAt, retryAudio.attempts + 1)
         transcribe()

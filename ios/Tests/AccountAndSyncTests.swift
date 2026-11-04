@@ -46,6 +46,19 @@ private final class DetachingDocument: NSObject {
     @objc dynamic var documentIdentifier: NSUUID?
 }
 
+private final class RetryCapture: CaptureEngine {
+    let wav = WAV.encode((0..<16000).map { Int16(sin(Double($0)*0.1)*1200) })
+    var active = false
+    var starts = 0
+    var recordings = 0
+    var meter: (level: Double, duration: Double) { (0.04, 1) }
+    func startSession() async throws { active = true; starts += 1 }
+    func begin() throws { recordings += 1 }
+    func finish() throws -> (wav: Data, duration: Double) { (wav, 1) }
+    func cancel() {}
+    func stopSession() { active = false }
+}
+
 @Suite(.serialized) @MainActor struct AccountAndSyncTests {
     @Test func audioTapCreatedOnMainActorCanRunOnRealtimeQueue() async throws {
         let format = try #require(AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false))
@@ -108,6 +121,38 @@ private final class DetachingDocument: NSObject {
         } catch let error as APIError {
             #expect(error.code == "INVALID_RESPONSE" && error.retryable)
         }
+    }
+    @Test func uploadRetryReusesAudioAndIgnoresRepeatedRetryWhileProcessing() async throws {
+        FixtureProtocol.router.configure { request, index in
+            switch request.url?.path {
+            case "/v1/transcriptions":
+                if index == 1 { return (503, Data(#"{"error":{"code":"TEMPORARY","message":"Please retry.","retryable":true}}"#.utf8)) }
+                return (200, Data(#"{"text":"Please meet tomorrow.","rawText":"please meet tomorrow","polished":true,"asrModel":"test","requestId":"retry-result","timingsMs":{"asr":1,"polish":1,"total":2},"usage":null}"#.utf8))
+            case "/v2/sync": return (200, Data(#"{"nextCursor":0,"hasMore":false,"items":[],"settings":{"historySyncEnabled":true,"historyRetentionDays":null,"legacyVault":false}}"#.utf8))
+            case "/v2/sync/batch":
+                let batch = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any]
+                let items = (batch?["items"] as? [[String: Any]] ?? []).map { ["id": $0["id"] ?? "", "type": $0["type"] ?? "", "version": ($0["baseVersion"] as? Int ?? 0) + 1] }
+                return (200, (try? JSONSerialization.data(withJSONObject: ["applied": items])) ?? Data())
+            default: return (200, Data(#"{"user":{"id":"alice","email":"fixture@example.test","role":"user","accountStatus":{"state":"active","supportEmail":"support@example.test"}},"quota":{"limitAudioSeconds":600,"remainingAudioSeconds":600,"resetAt":1900000000000}}"#.utf8))
+            }
+        }
+        let capture = RetryCapture()
+        let model = try AppModel(api: api(), persistence: MemorySessionStore(), capture: capture, databaseURL: URL(fileURLWithPath: ":memory:"))
+        defer { model.stopSession() }
+        try model.account.accept(tokens()); try model.reload()
+        await model.startSession(keyboard: false)
+        model.toggleRecording(); model.toggleRecording()
+        for _ in 0..<100 where model.status.phase != "error" { try await Task.sleep(for: .milliseconds(20)) }
+        try #require(model.status.phase == "error" && model.status.canRetry)
+        #expect(!model.microphoneActive && model.history.isEmpty && model.analytics.isEmpty)
+        model.retry(); model.retry()
+        for _ in 0..<100 where model.history.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        let uploads = FixtureProtocol.router.captured().filter { $0.url?.path == "/v1/transcriptions" }
+        #expect(uploads.count == 2)
+        #expect(uploads.allSatisfy { $0.httpBody?.range(of: capture.wav) != nil })
+        #expect(capture.starts == 1 && capture.recordings == 1 && !capture.active)
+        #expect(model.history.count == 1 && model.analytics.count == 1)
+        #expect(model.lastText == "Please meet tomorrow." && !model.status.canRetry)
     }
     @Test func rotatingRefreshIsSingleFlightAndPersisted() async throws {
         let refreshed = try JSONEncoder().encode(tokens("rotated"))

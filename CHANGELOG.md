@@ -4,6 +4,7 @@
 
 ### iOS — in development
 
+- Prevented repeated Retry commands from starting duplicate uploads while a dictation request is already processing.
 - Improved the keyboard at large accessibility text sizes so mode switches, Finish and Cancel remain reachable. Added descriptive keyboard accessibility labels and Shift/caps-lock state.
 - Fixed an unreadable sign-in button label in dark mode.
 - Fixed a Swift 6 actor-isolation crash when microphone buffers arrive on the realtime audio thread. App restart clears orphaned Live Activities, and expired activities show that the session ended.
