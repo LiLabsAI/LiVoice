@@ -4,6 +4,8 @@
 
 ### iOS — in development
 
+- Fixed a Swift 6 actor-isolation crash when microphone buffers arrive on the realtime audio thread. App restart clears orphaned Live Activities, and expired activities show that the session ended.
+- Fixed dictation in empty text fields and false insertion-success messages when an editor rejects text. Live Activity controls now open WoVoice to stop the microphone reliably.
 - Added a native iPhone/iPad workspace with dictation, History, Dictionary, analytics, account settings, device sessions, and existing Cloudflare sync.
 - Added foreground-only shortcut activation, interruption cancellation checks, and accessible layouts for large-text Home and vocabulary controls.
 - Added dedicated voice and typing modes, vocabulary search, and visible confirmation for suggested words. Home puts dictation controls before analytics.

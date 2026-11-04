@@ -20,6 +20,12 @@ nonisolated final class AudioAccumulator: @unchecked Sendable {
     func begin() { lock.lock(); defer { lock.unlock() }; samples.removeAll(keepingCapacity: true); collecting = true; converter.reset() }
     func finish() -> [Int16] { lock.lock(); defer { lock.unlock() }; collecting = false; let result = samples; samples = []; rms = 0; return result }
     func state() -> (level: Double, duration: Double) { lock.lock(); defer { lock.unlock() }; return (rms, Double(samples.count)/16000) }
+    func makeTap() -> @Sendable (AVAudioPCMBuffer, AVAudioTime) -> Void {
+        // AVAudioNodeTapBlock lacks Sendable annotations in the SDK. Creating
+        // its closure in the MainActor owner would inherit that isolation and
+        // trap when AVAudioEngine invokes it on its realtime audio thread.
+        { @Sendable [self] buffer, _ in ingest(buffer) }
+    }
     func ingest(_ buffer: AVAudioPCMBuffer) {
         lock.lock(); defer { lock.unlock() }
         guard collecting, samples.count < 960000 else { return }
@@ -64,7 +70,7 @@ final class AudioCapture: CaptureEngine {
         let engine = AVAudioEngine()
         let input = engine.inputNode
         let accumulator = try AudioAccumulator(input: input.outputFormat(forBus: 0))
-        input.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, _ in accumulator.ingest(buffer) }
+        input.installTap(onBus: 0, bufferSize: 1024, format: nil, block: accumulator.makeTap())
         do { try engine.start() }
         catch { input.removeTap(onBus: 0); try? session.setActive(false, options: .notifyOthersOnDeactivation); throw error }
         self.engine = engine; self.accumulator = accumulator

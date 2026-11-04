@@ -12,21 +12,32 @@ struct SessionWidget: Widget {
                 Image(systemName: "waveform").font(.title2).foregroundStyle(.orange)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("WoVoice keyboard session").font(.headline)
-                    Text(context.state.phase).font(.caption)
-                    countdown(context.state.expiresAt)
+                    Text(context.isStale ? "Session ended · Open WoVoice" : context.state.phase).font(.caption)
+                    if !context.isStale { countdown(context.state.expiresAt) }
                 }
                 Spacer()
-                Button(intent: StopKeyboardSessionIntent()) { Label("Stop", systemImage: "stop.fill") }.buttonStyle(.bordered)
+                if !context.isStale { Link(destination: SessionControl.stopURL) { Label("Open to stop", systemImage: "stop.fill") }.buttonStyle(.bordered) }
             }.padding(16).activityBackgroundTint(.black).activitySystemActionForegroundColor(.white).foregroundStyle(.white)
+                .widgetURL(context.isStale ? URL(string: "wovoice-ios://session")! : SessionControl.stopURL)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) { Label("WoVoice", systemImage: "waveform").foregroundStyle(.orange) }
-                DynamicIslandExpandedRegion(.trailing) { countdown(context.state.expiresAt) }
+                DynamicIslandExpandedRegion(.trailing) {
+                    if context.isStale { Text("Ended").font(.caption) }
+                    else { countdown(context.state.expiresAt) }
+                }
                 DynamicIslandExpandedRegion(.bottom) {
-                    HStack { Text(context.state.phase).font(.caption); Spacer(); Button(intent: StopKeyboardSessionIntent()) { Label("Stop microphone", systemImage: "stop.fill") } }
+                    HStack {
+                        Text(context.isStale ? "Session ended · Open WoVoice" : context.state.phase).font(.caption)
+                        Spacer()
+                        if !context.isStale { Link(destination: SessionControl.stopURL) { Label("Open to stop microphone", systemImage: "stop.fill") } }
+                    }
                 }
             } compactLeading: { Image(systemName: "waveform").foregroundStyle(.orange) }
-                compactTrailing: { countdown(context.state.expiresAt).frame(width: 42) }
+                compactTrailing: {
+                    if context.isStale { Text("Ended").font(.caption) }
+                    else { countdown(context.state.expiresAt).frame(width: 42) }
+                }
                 minimal: { Image(systemName: "mic.fill").foregroundStyle(.orange) }
         }
     }

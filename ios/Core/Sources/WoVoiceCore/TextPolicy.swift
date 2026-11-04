@@ -40,11 +40,42 @@ public struct EditorSnapshot: Equatable, Sendable {
     public let before: String?
     public let after: String?
     public let selected: String?
-    public init(document: UUID, before: String?, after: String?, selected: String?) {
-        self.document = document; self.before = before; self.after = after; self.selected = selected
+    public init(document: UUID, before: String?, after: String?, selected: String?, hasText: Bool? = nil) {
+        // UIKit can return nil contexts for a genuinely empty field. An
+        // explicit public hasText == false distinguishes it from hidden text.
+        self.document = document
+        self.before = before ?? (hasText == false ? "" : nil)
+        self.after = after ?? (hasText == false ? "" : nil)
+        self.selected = selected
     }
     public var exposesContext: Bool { before != nil || after != nil || selected != nil }
     public func matches(_ other: EditorSnapshot) -> Bool { exposesContext && self == other }
+    /// insertText has no success result. Confirm only when the same editor
+    /// exposes the complete inserted text at the cursor; never retry blindly.
+    public func confirmsInsertion(_ text: String, since original: EditorSnapshot) -> Bool {
+        guard document == original.document, !text.isEmpty, selected?.isEmpty != false,
+              let before, before.hasSuffix(text),
+              before != original.before || original.selected?.isEmpty == false,
+              ((original.before ?? "") + text).hasSuffix(before) else { return false }
+        if let originalAfter = original.after, (after ?? "") != originalAfter { return false }
+        return true
+    }
+}
+
+/// The proxy can optimistically report an insertion that the host later rejects.
+/// Keep checking separate from requesting insertion, and never retry on doubt.
+public struct InsertionVerification: Sendable {
+    public enum Outcome: Sendable { case waiting, confirmed, unconfirmed }
+    private let original: EditorSnapshot
+    private let text: String
+    private let settlesAt: ContinuousClock.Instant
+    public init(original: EditorSnapshot, text: String, now: ContinuousClock.Instant = .now) {
+        self.original = original; self.text = text; settlesAt = now.advanced(by: .seconds(1))
+    }
+    public func outcome(in current: EditorSnapshot?, now: ContinuousClock.Instant = .now) -> Outcome {
+        guard now >= settlesAt else { return .waiting }
+        return current?.confirmsInsertion(text, since: original) == true ? .confirmed : .unconfirmed
+    }
 }
 
 public struct SpeechSignal: Sendable {

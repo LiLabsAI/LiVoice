@@ -2,6 +2,10 @@ import ActivityKit
 import AppIntents
 import Foundation
 
+nonisolated enum SessionControl {
+    static let stopURL = URL(string: "wovoice-ios://session/stop")!
+}
+
 nonisolated struct SessionActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable {
         var expiresAt: Date

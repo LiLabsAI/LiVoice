@@ -57,6 +57,50 @@ import Testing
     #expect(TextPolicy.sentenceStart(before: "Hello. "))
     #expect(!TextPolicy.sentenceStart(before: "Hello "))
 }
+@Test func blankFieldsRequireExplicitEmptyStateAndStableDocumentIdentity() {
+    let document = UUID()
+    let empty = EditorSnapshot(document: document, before: nil, after: nil, selected: nil, hasText: false)
+    #expect(empty.exposesContext && empty.before == "" && empty.after == "")
+    #expect(empty.matches(empty))
+    #expect(!empty.matches(.init(document: UUID(), before: nil, after: nil, selected: nil, hasText: false)))
+    #expect(!EditorSnapshot(document: document, before: nil, after: nil, selected: nil, hasText: true).exposesContext)
+    #expect(!EditorSnapshot(document: document, before: nil, after: nil, selected: nil).exposesContext)
+    let accepted = EditorSnapshot(document: document, before: "Hello.", after: nil, selected: nil, hasText: true)
+    // End-of-document can be reported as nil once the field is nonempty.
+    #expect(accepted.confirmsInsertion("Hello.", since: empty))
+}
+@Test func insertionConfirmationRequiresAcceptedTextInTheOriginalEditor() {
+    let document = UUID()
+    let original = EditorSnapshot(document: document, before: "Start: ", after: "", selected: nil)
+    func result(_ before: String?, after: String? = "", selected: String? = nil, id: UUID? = nil) -> EditorSnapshot {
+        .init(document: id ?? document, before: before, after: after, selected: selected)
+    }
+    #expect(result("Start: Hello.").confirmsInsertion("Hello.", since: original))
+    #expect(result("Hello.").confirmsInsertion("Hello.", since: original)) // bounded context
+    #expect(!original.confirmsInsertion("A sentence longer than the field allows.", since: original))
+    #expect(!result("Start: A sentence").confirmsInsertion("A sentence longer than the field allows.", since: original))
+    #expect(!result(nil, after: nil).confirmsInsertion("Hello.", since: original))
+    #expect(!result("Start: Hello.", id: UUID()).confirmsInsertion("Hello.", since: original))
+    #expect(!result("Start: Hello.", after: "different").confirmsInsertion("Hello.", since: original))
+    #expect(!result("Start: Hello.", selected: "Hello.").confirmsInsertion("Hello.", since: original))
+    let repeating = result("Hello.")
+    #expect(!repeating.confirmsInsertion("Hello.", since: repeating))
+    let selected = result("Start: ", selected: "old")
+    #expect(result("Start: Hello.").confirmsInsertion("Hello.", since: selected))
+    let unicode = result("Start: বাংলা 😀")
+    #expect(unicode.confirmsInsertion("বাংলা 😀", since: original))
+}
+@Test func insertionWaitsForHostToRejectAnOptimisticProxyUpdate() {
+    let document = UUID(); let now = ContinuousClock.now
+    let original = EditorSnapshot(document: document, before: "Start: ", after: "", selected: nil)
+    let optimistic = EditorSnapshot(document: document, before: "Start: A long sentence.", after: "", selected: nil)
+    let verification = InsertionVerification(original: original, text: "A long sentence.", now: now)
+    #expect(verification.outcome(in: optimistic, now: now) == .waiting)
+    #expect(verification.outcome(in: optimistic, now: now.advanced(by: .milliseconds(200))) == .waiting)
+    #expect(verification.outcome(in: original, now: now.advanced(by: .seconds(1))) == .unconfirmed)
+    #expect(verification.outcome(in: optimistic, now: now.advanced(by: .seconds(1))) == .confirmed)
+    #expect(verification.outcome(in: nil, now: now.advanced(by: .seconds(1))) == .unconfirmed)
+}
 @Test func wavAndSilenceThresholds() {
     let samples = (0..<8000).map { Int16(sin(Double($0) * 0.1) * 150) }
     let wav = WAV.encode(samples)

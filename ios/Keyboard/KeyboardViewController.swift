@@ -27,6 +27,7 @@ final class KeyboardViewController: UIInputViewController {
     private var lastPhase = ""
     private var localMessage: String?
     private var correction: (text: String, document: UUID, expires: Date, recordID: String?)?
+    private var insertion: (verification: InsertionVerification, document: UUID, transcript: String, recordID: String?, owner: String?)?
 
     isolated deinit { polling?.invalidate(); deleteTimer?.invalidate() }
 
@@ -106,7 +107,7 @@ final class KeyboardViewController: UIInputViewController {
     private var snapshot: EditorSnapshot? {
         guard let documentIdentifier else { return nil }
         return .init(document: documentIdentifier, before: textDocumentProxy.documentContextBeforeInput,
-              after: textDocumentProxy.documentContextAfterInput, selected: textDocumentProxy.selectedText)
+              after: textDocumentProxy.documentContextAfterInput, selected: textDocumentProxy.selectedText, hasText: textDocumentProxy.hasText)
     }
     private var sensitive: Bool { textDocumentProxy.isSecureTextEntry == true }
     private var field: FieldKind {
@@ -137,10 +138,29 @@ final class KeyboardViewController: UIInputViewController {
             }
             // Clear the request before insertText can synchronously notify textDidChange.
             pending.reset(); self.target = nil
-            textDocumentProxy.insertText(field == .literal ? text : TextPolicy.spaced(text, before: target.before, after: target.after, selected: target.selected))
+            let inserted = field == .literal ? text : TextPolicy.spaced(text, before: target.before, after: target.after, selected: target.selected)
+            correction = nil
+            insertion = (InsertionVerification(original: target, text: inserted), target.document, text, status.recordID, status.owner)
+            textDocumentProxy.insertText(inserted)
             send(.acknowledge, request: request)
-            if status.learning, field == .text { correction = (text, target.document, .now.addingTimeInterval(30), status.recordID) }
-            feedback(); localMessage = "Inserted"
+            localMessage = "Checking insertion…"
+        }
+        if let insertion {
+            if !hasFullAccess || !status.available || status.owner != insertion.owner || sensitive {
+                self.insertion = nil
+                localMessage = "Insertion unconfirmed. Check the field or copy your text in WoVoice."
+            } else {
+                switch insertion.verification.outcome(in: snapshot) {
+                case .waiting: break
+                case .confirmed:
+                    self.insertion = nil
+                    if status.learning, field == .text { correction = (insertion.transcript, insertion.document, .now.addingTimeInterval(30), insertion.recordID) }
+                    feedback(); localMessage = "Inserted"
+                case .unconfirmed:
+                    self.insertion = nil
+                    localMessage = "Insertion unconfirmed. Check the field or copy your text in WoVoice."
+                }
+            }
         }
         renderStatus()
     }
@@ -183,7 +203,7 @@ final class KeyboardViewController: UIInputViewController {
     }
     @objc private func speak() {
         guard hasFullAccess, status.available, !sensitive else { return }
-        localMessage = nil
+        insertion = nil; localMessage = nil
         if let request {
             if status.phase == "recording" { send(.finish, request: request) }
             else if status.phase == "error", status.canRetry { send(.retry, request: request) }
@@ -204,7 +224,8 @@ final class KeyboardViewController: UIInputViewController {
     }
     private func abandon() {
         if let request { send(.cancel, request: request); bridge.removeLease(request: request) }
-        pending.reset(); target = nil
+        if insertion != nil { localMessage = "Insertion unconfirmed. Check the field or copy your text in WoVoice." }
+        pending.reset(); target = nil; insertion = nil
     }
     private func learnCorrection() {
         guard let correction, correction.expires > .now, status.learning, status.available, hasFullAccess, !sensitive, field == .text,

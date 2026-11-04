@@ -21,6 +21,9 @@ import SwiftUI
         WindowGroup {
             if let model {
                 dashboard(model)
+                    .onOpenURL { url in
+                        if model.handleSessionURL(url) { AppRuntime.shared.cancelKeyboardSessionRequest() }
+                    }
                     .onChange(of: scenePhase, initial: true) { _, _ in startRequestedSession(model) }
                     .onChange(of: AppRuntime.shared.pendingKeyboardSession) { _, _ in startRequestedSession(model) }
             }

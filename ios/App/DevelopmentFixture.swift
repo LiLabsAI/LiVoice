@@ -89,7 +89,7 @@ struct FixtureEditorsView: View {
         VStack(alignment: .leading, spacing: 16) {
                 Text("Synthetic editor tests").font(.headline)
                 Text(DevelopmentFixture.microphoneEnabled ? "Local microphone test. Audio stays on this computer; the test service returns a fixed sentence." : "Uses invented text and audio. No microphone or production service.").font(.caption).foregroundStyle(.secondary)
-                Picker("Editor", selection: $kind) { Text("Native").tag(0); Text("Web").tag(1); Text("Password").tag(2) }.pickerStyle(.segmented)
+                Picker("Editor", selection: $kind) { Text("Native").tag(0); Text("Web").tag(1); Text("Password").tag(2); Text("Limited").tag(3) }.pickerStyle(.segmented)
                 if kind == 0 {
                     Text("Native rich text").font(.subheadline)
                     FixtureRichEditor(report: $report).frame(height: 130).overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary))
@@ -98,19 +98,37 @@ struct FixtureEditorsView: View {
                     Text("Web rich text").font(.subheadline)
                     FixtureWebEditor(report: $webReport).frame(maxWidth: .infinity).frame(height: 130).overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary))
                     Text(webReport).font(.caption)
-                } else {
+                } else if kind == 2 {
                     SecureField("Password field: system keyboard only", text: $secret).textFieldStyle(.roundedBorder)
+                } else {
+                    Text("Native field · 20-character limit").font(.subheadline)
+                    FixtureLimitedEditor().frame(height: 50)
+                    Text("The host rejects text exceeding its limit.").font(.caption)
                 }
                 Spacer(minLength: 0)
         }.navigationTitle("Editor checks")
             .padding()
     }
 }
+private struct FixtureLimitedEditor: UIViewRepresentable {
+    func makeUIView(context: Context) -> UITextField {
+        let view = UITextField(); view.text = "Start: "; view.borderStyle = .roundedRect
+        view.delegate = context.coordinator; view.accessibilityIdentifier = "limitedEditor"
+        return view
+    }
+    func updateUIView(_ view: UITextField, context: Context) {}
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+            ((textField.text ?? "") as NSString).replacingCharacters(in: range, with: string).utf16.count <= 20
+        }
+    }
+}
 private struct FixtureRichEditor: UIViewRepresentable {
     @Binding var report: String
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView(); view.font = .systemFont(ofSize: 20); view.accessibilityIdentifier = "richEditor"
-        let text = NSMutableAttributedString(string: "Hello bold world.", attributes: [.font: UIFont.systemFont(ofSize: 20)])
+        let text = NSMutableAttributedString(string: "Hello bold world.", attributes: [.font: UIFont.systemFont(ofSize: 20), .foregroundColor: UIColor.label])
         text.addAttribute(.font, value: UIFont.boldSystemFont(ofSize: 20), range: NSRange(location: 6,length: 4))
         view.attributedText = text; view.delegate = context.coordinator; view.autocorrectionType = .no
         return view

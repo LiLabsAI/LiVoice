@@ -74,6 +74,11 @@ import WoVoiceCore
         _ = bridge.drainCommands()
         bridge.clearLeases()
         bridge.remove("status.json")
+        // A crash can leave an activity behind even though its audio engine is
+        // gone. Capture only existing IDs so this cleanup cannot end a new one.
+        for id in Activity<SessionActivityAttributes>.activities.map(\.id) {
+            Task { await SessionActivities.end(id: id) }
+        }
         observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] notification in
             guard (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) == AVAudioSession.InterruptionType.began.rawValue else { return }
             Task { @MainActor in self?.stopSession(message: "Audio was interrupted. Start a new session when ready.") }
@@ -276,6 +281,10 @@ import WoVoiceCore
             }
             publish()
         } catch { audio.stopSession(); message = error.localizedDescription }
+    }
+    @discardableResult func handleSessionURL(_ url: URL) -> Bool {
+        guard url == SessionControl.stopURL else { return false }
+        stopSession(); return true
     }
     func stopSession(message: String? = nil) {
         if let request = status.request { bridge.removeLease(request: request) }

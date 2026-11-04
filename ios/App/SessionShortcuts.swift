@@ -7,6 +7,7 @@ import Observation
     private(set) var pendingKeyboardSession = false
 
     func requestKeyboardSession() { pendingKeyboardSession = true }
+    func cancelKeyboardSessionRequest() { pendingKeyboardSession = false }
     func takeKeyboardSession(whileActive active: Bool) -> Bool {
         guard active, pendingKeyboardSession else { return false }
         pendingKeyboardSession = false

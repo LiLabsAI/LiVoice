@@ -47,6 +47,26 @@ private final class DetachingDocument: NSObject {
 }
 
 @Suite(.serialized) @MainActor struct AccountAndSyncTests {
+    @Test func audioTapCreatedOnMainActorCanRunOnRealtimeQueue() async throws {
+        let format = try #require(AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false))
+        let accumulator = try AudioAccumulator(input: format)
+        accumulator.begin()
+        let tap = accumulator.makeTap()
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let input = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false)!
+                let buffer = AVAudioPCMBuffer(pcmFormat: input, frameCapacity: 4800)!
+                buffer.frameLength = 4800
+                for i in 0..<4800 { buffer.floatChannelData![0][i] = Float(sin(Double(i)*0.1)*0.08) }
+                tap(buffer, AVAudioTime(sampleTime: 0, atRate: 48000))
+                continuation.resume()
+            }
+        }
+        // AVAudioConverter can retain priming frames from the first buffer.
+        #expect(accumulator.state().duration > 0)
+        #expect(accumulator.state().level > 0)
+        #expect(!accumulator.finish().isEmpty)
+    }
     @Test func shortcutWaitsForForegroundAndConsumesEachRequestOnce() async throws {
         let runtime = AppRuntime()
         let model = try DevelopmentFixture.makeModel()
@@ -203,6 +223,36 @@ private final class DetachingDocument: NSObject {
         try await Task.sleep(for: .milliseconds(500))
         #expect(!model.keyboardSessionActive)
         #expect(model.status.result == nil)
+    }
+    @Test func stopLinkCancelsCaptureAndAcceptsOnlyItsFixedRoute() async throws {
+        let model = try DevelopmentFixture.makeModel()
+        defer { model.stopSession() }
+        await model.startSession()
+        model.toggleRecording()
+        #expect(model.recording)
+        for route in ["wovoice-ios://callback?code=example", "https://example.test/session/stop", "wovoice-ios://session/start", "wovoice-ios://session/stop?extra=1"] {
+            #expect(!model.handleSessionURL(URL(string: route)!))
+            #expect(model.recording)
+        }
+        #expect(model.handleSessionURL(SessionControl.stopURL))
+        #expect(!model.recording && !model.keyboardSessionActive)
+        #expect(model.status.request == nil && model.status.result == nil)
+        #expect(model.history.isEmpty)
+        let runtime = AppRuntime(); runtime.requestKeyboardSession(); runtime.cancelKeyboardSessionRequest()
+        #expect(!runtime.takeKeyboardSession(whileActive: true))
+    }
+    @Test func launchClearsOrphanedActivityWithoutEndingTheNewSession() async throws {
+        try #require(ActivityAuthorizationInfo().areActivitiesEnabled)
+        let expiry = Date.now.addingTimeInterval(300)
+        let orphan = try Activity.request(attributes: SessionActivityAttributes(), content: .init(state: .init(expiresAt: expiry, phase: "Microphone active · Ready"), staleDate: expiry), pushType: nil)
+        let orphanID = orphan.id
+        let model = try DevelopmentFixture.makeModel()
+        defer { model.stopSession() }
+        await model.startSession()
+        try await Task.sleep(for: .milliseconds(400))
+        let remaining = Activity<SessionActivityAttributes>.activities.map(\.id)
+        #expect(!remaining.contains(orphanID))
+        #expect(!remaining.isEmpty && model.keyboardSessionActive)
     }
     @Test func audioInterruptionsRouteChangesAndResetCancelPendingDictation() async throws {
         let events: [(Notification.Name, [String: UInt])] = [

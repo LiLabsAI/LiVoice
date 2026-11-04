@@ -18,7 +18,7 @@ xcodebuild -project WoVoice.xcodeproj -scheme WoVoice \
 
 Open `WoVoice.xcodeproj` in Xcode, choose an installed iPhone/iPad simulator and Run. Xcode 27 calls the Simulator interface **Device Hub**. Keep ad-hoc simulator signing enabled: `CODE_SIGNING_ALLOWED=NO` produces an app that cannot use Keychain. No Apple account is needed for simulator development.
 
-For isolated development checks, launch a Debug build with `--fixture`. The visible **Sample workspace** uses an in-memory account/database, generated audio, and a URLProtocol fake service. It cannot contact the production API and is excluded from Release builds. Its native/WebKit/password editors exercise the real keyboard extension, including formatting preservation and cursor-change cancellation. Simulator keyboard Full Access still requires an explicit user choice.
+For isolated development checks, launch a Debug build with `--fixture`. The visible **Sample workspace** uses an in-memory account/database, generated audio, and a URLProtocol fake service. It cannot contact the production API and is excluded from Release builds. Its native/WebKit/password/character-limit editors exercise the real keyboard extension, including formatting preservation and cursor-change cancellation. Simulator keyboard Full Access still requires an explicit user choice.
 
 `--fixture-microphone` uses the same local-only server and in-memory account with the **real microphone engine**. The visible banner identifies the test mode. Use it only after obtaining microphone-test permission: audio stays in memory, the server does not perform speech recognition, and all audio is discarded afterward. This mode is also excluded from Release builds.
 
@@ -33,9 +33,9 @@ For a physical device select your own Apple development team for all targets, pr
 1. Sign in through the secure system authentication window. The website must include the fixed `platform=ios` callback introduced with this client; production deployment is separate.
 2. In iOS Settings → General → Keyboard → Keyboards, add WoVoice and allow Full Access. Offline typing and the globe key work without Full Access.
 3. In WoVoice, start a five-minute keyboard session. The microphone remains active for the duration, and audio between dictations is discarded in memory.
-4. Return to the desired app, choose WoVoice with the globe key, and tap Speak/Finish. The extension inserts only if the original document, cursor context and selection still match.
+4. Return to the desired app, choose WoVoice with the globe key, and tap Speak/Finish. The extension inserts only if the original document, cursor context and selection still match. It checks the host response before showing Inserted. If insertion cannot be confirmed, check the field or copy the result from WoVoice.
 5. For a system shortcut, create one in Apple Shortcuts and add WoVoice → **Start WoVoice keyboard session**. The direct action works on the tested iOS 26.5 simulator; the automatic tile also works on iOS 27.2. Its older-runtime provider-lookup failure is isolated in [a minimal diagnostic](diagnostics/shortcut-provider/README.md).
-6. Stop the session in WoVoice, or let it expire. Audio interruptions and force-quit end it. Expired or unavailable sessions show setup guidance.
+6. Stop the session in WoVoice, use **Open to stop** in its Dynamic Island/Lock Screen activity, or let it expire. The activity link opens WoVoice to release the microphone; a locked phone may require unlocking. Audio interruptions and force-quit end it. Expired or unavailable sessions show setup guidance.
 
 iOS has no Android accessibility bubble. Password fields, phone pads, and apps that reject third-party keyboards use the system keyboard. The keyboard cannot identify WhatsApp/Mail or read whole conversations. Automatic context uses exposed field traits and, only with consent, bounded cursor snippets. No unsupported URL-opening or private APIs are used.
 
