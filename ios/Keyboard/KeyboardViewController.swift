@@ -13,6 +13,8 @@ final class KeyboardViewController: UIInputViewController {
     private var lastShift = Date.distantPast
     private var layout = 0
     private let root = UIStackView()
+    private let header = UIStackView()
+    private let controls = UIStackView()
     private let keys = UIStackView()
     private let statusLabel = UILabel()
     private let microphone = UIButton(type: .system)
@@ -20,6 +22,7 @@ final class KeyboardViewController: UIInputViewController {
     private let modeButton = UIButton(type: .system)
     private let voicePanel = UIStackView()
     private let voiceHint = UILabel()
+    private let nextKeyboard = UIButton(type: .system)
     private var showTyping = false
     private let cancel = UIButton(type: .system)
     private let waveform = KeyboardWaveformView()
@@ -41,43 +44,69 @@ final class KeyboardViewController: UIInputViewController {
             root.topAnchor.constraint(equalTo: view.topAnchor, constant: 8), root.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -6),
             view.heightAnchor.constraint(greaterThanOrEqualToConstant: 292)
         ])
-        let header = UIStackView(); header.spacing = 10; header.alignment = .center
+        header.spacing = 10; header.alignment = .center
+        controls.spacing = 6; controls.alignment = .center
+        controls.setContentHuggingPriority(.required, for: .horizontal)
+        controls.setContentCompressionResistancePriority(.required, for: .horizontal)
         statusLabel.font = .preferredFont(forTextStyle: .caption1); statusLabel.numberOfLines = 2; statusLabel.textColor = .secondaryLabel
         statusLabel.adjustsFontForContentSizeCategory = true
         statusLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         microphone.configuration = .filled(); microphone.configuration?.cornerStyle = .capsule
+        microphone.configuration?.preferredSymbolConfigurationForImage = .init(pointSize: 20)
         microphone.tintColor = .label; microphone.accessibilityIdentifier = "keyboardDictate"
         microphone.addTarget(self, action: #selector(speak), for: .touchUpInside)
         microphone.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         modeButton.titleLabel?.font = .preferredFont(forTextStyle: .subheadline)
+        modeButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         modeButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         modeButton.addTarget(self, action: #selector(toggleMode), for: .touchUpInside)
         cancel.setImage(UIImage(systemName: "xmark.circle"), for: .normal); cancel.accessibilityLabel = "Cancel dictation"
+        cancel.setPreferredSymbolConfiguration(.init(pointSize: 22), forImageIn: .normal)
         cancel.addTarget(self, action: #selector(cancelPressed), for: .touchUpInside)
         cancel.widthAnchor.constraint(equalToConstant: 44).isActive = true
         cancel.heightAnchor.constraint(equalToConstant: 44).isActive = true
         waveform.widthAnchor.constraint(equalToConstant: 34).isActive = true
         waveform.heightAnchor.constraint(equalToConstant: 24).isActive = true
         waveform.accessibilityElementsHidden = true
-        header.addArrangedSubview(statusLabel); header.addArrangedSubview(waveform); header.addArrangedSubview(cancel); header.addArrangedSubview(microphone); header.addArrangedSubview(modeButton)
+        controls.addArrangedSubview(UIView())
+        controls.addArrangedSubview(waveform); controls.addArrangedSubview(cancel); controls.addArrangedSubview(microphone); controls.addArrangedSubview(modeButton)
+        header.addArrangedSubview(statusLabel); header.addArrangedSubview(controls)
         root.addArrangedSubview(header)
         voicePanel.axis = .vertical; voicePanel.alignment = .center; voicePanel.distribution = .equalSpacing; voicePanel.spacing = 10
         voiceButton.configuration = .filled(); voiceButton.configuration?.cornerStyle = .capsule
+        voiceButton.configuration?.preferredSymbolConfigurationForImage = .init(pointSize: 28)
         voiceButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 88).isActive = true
         voiceButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 72).isActive = true
         voiceButton.addTarget(self, action: #selector(speak), for: .touchUpInside)
         voiceButton.accessibilityIdentifier = "voiceModeDictate"
         voiceHint.font = .preferredFont(forTextStyle: .subheadline); voiceHint.adjustsFontForContentSizeCategory = true
         voiceHint.numberOfLines = 2; voiceHint.textAlignment = .center
-        let nextKeyboard = UIButton(type: .system)
         nextKeyboard.setTitle("Next keyboard", for: .normal); nextKeyboard.setImage(UIImage(systemName: "globe"), for: .normal)
+        nextKeyboard.accessibilityLabel = "Next keyboard"
         nextKeyboard.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
         nextKeyboard.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         voicePanel.addArrangedSubview(voiceButton); voicePanel.addArrangedSubview(voiceHint); voicePanel.addArrangedSubview(nextKeyboard)
         root.addArrangedSubview(voicePanel)
         keys.axis = .vertical; keys.spacing = 6; keys.distribution = .fillEqually
         root.addArrangedSubview(keys)
+        updateTextLayout()
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: KeyboardViewController, _: UITraitCollection) in
+            self.updateTextLayout()
+        }
         renderKeys(); renderStatus()
+    }
+    private func updateTextLayout() {
+        let large = traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+        header.axis = large ? .vertical : .horizontal
+        header.alignment = large ? .fill : .center
+        statusLabel.numberOfLines = large ? 4 : 2
+        modeButton.titleLabel?.font = .preferredFont(forTextStyle: large ? .caption1 : .subheadline)
+        nextKeyboard.titleLabel?.font = .preferredFont(forTextStyle: .callout)
+        nextKeyboard.setTitle(large ? "Next" : "Next keyboard", for: .normal)
+        // The control's accessibility hint retains this guidance when space is
+        // needed for large text and the editor above the keyboard.
+        voiceHint.isHidden = large
     }
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
@@ -166,18 +195,20 @@ final class KeyboardViewController: UIInputViewController {
     }
     private func renderStatus() {
         let phase = pending.awaitingAcknowledgement ? "starting" : request != nil && status.request == request ? status.phase : "idle"
+        let large = traitCollection.preferredContentSizeCategory.isAccessibilityCategory
         keys.isHidden = !showTyping; voicePanel.isHidden = showTyping; microphone.isHidden = !showTyping
         modeButton.setTitle(showTyping ? "Voice" : "ABC", for: .normal)
         modeButton.accessibilityLabel = showTyping ? "Show dictation controls" : "Show typing keyboard"
         cancel.isHidden = request == nil
-        waveform.isHidden = phase != "recording" || !status.waveform
+        waveform.isHidden = phase != "recording" || !status.waveform || large
         waveform.update(level: status.level, animated: status.animate && !UIAccessibility.isReduceMotionEnabled)
         if !hasFullAccess { statusLabel.text = "Typing works offline. Allow Full Access in Settings for dictation." }
         else if !status.available { statusLabel.text = localMessage ?? "Open WoVoice → Start keyboard session, then return here." }
-        else { statusLabel.text = localMessage ?? (phase == "recording" ? "Listening · \(Int(status.elapsed))s / 60s" : phase == "processing" ? "Thinking…" : phase == "error" ? status.message : "WoVoice · Microphone session active") }
+        else { statusLabel.text = localMessage ?? (phase == "recording" ? "Listening · \(Int(status.elapsed))s / 60s" : phase == "processing" ? "Thinking…" : phase == "error" ? status.message : large ? "Microphone active" : "WoVoice · Microphone session active") }
         microphone.isEnabled = hasFullAccess && status.available && !sensitive && phase != "processing" && phase != "starting"
         let label = phase == "starting" ? "Starting…" : phase == "recording" ? "Finish" : phase == "processing" ? "Thinking" : phase == "error" && status.canRetry ? "Retry" : "Speak"
-        microphone.configuration?.title = label
+        microphone.configuration?.title = large && (phase == "starting" || phase == "processing") ? "Wait" : label
+        microphone.titleLabel?.numberOfLines = 1
         microphone.configuration?.image = UIImage(systemName: phase == "recording" ? "stop.fill" : "mic.fill")
         microphone.configuration?.imagePadding = 6
         microphone.configuration?.baseBackgroundColor = phase == "recording" ? .systemRed : .label
@@ -190,6 +221,9 @@ final class KeyboardViewController: UIInputViewController {
         voiceButton.configuration?.baseForegroundColor = .systemBackground
         voiceButton.accessibilityLabel = phase == "recording" ? "Finish dictation" : phase == "starting" ? "Starting dictation" : phase == "processing" ? "Processing dictation" : phase == "error" && status.canRetry ? "Retry dictation upload" : "Start dictation"
         voiceHint.text = phase == "recording" ? "Tap Finish when you’re done" : phase == "processing" ? "Turning speech into text…" : !hasFullAccess ? "Typing works without Full Access" : !status.available ? "Start a keyboard session in WoVoice" : "Tap to speak · up to 60 seconds"
+        voiceButton.accessibilityHint = voiceHint.text
+        microphone.accessibilityLabel = voiceButton.accessibilityLabel
+        microphone.accessibilityHint = voiceHint.text
         if phase != lastPhase {
             if status.animate && !UIAccessibility.isReduceMotionEnabled {
                 microphone.transform = CGAffineTransform(scaleX: 0.96, y: 0.96)
@@ -255,14 +289,22 @@ final class KeyboardViewController: UIInputViewController {
             let button = UIButton(type: .system)
             button.backgroundColor = .systemBackground; button.layer.cornerRadius = 6; button.tintColor = .label
             button.titleLabel?.font = .systemFont(ofSize: value.count == 1 ? 21 : 15)
+            button.setPreferredSymbolConfiguration(.init(pointSize: 21, weight: .regular), forImageIn: .normal)
+            button.accessibilityTraits = .keyboardKey
             switch value {
             case "globe": button.setImage(UIImage(systemName: "globe"), for: .normal); button.accessibilityLabel = "Next keyboard"; button.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
-            case "shift": button.setImage(UIImage(systemName: caps ? "capslock.fill" : shift ? "shift.fill" : "shift"), for: .normal); button.accessibilityLabel = "Shift"
+            case "shift":
+                button.setImage(UIImage(systemName: caps ? "capslock.fill" : shift ? "shift.fill" : "shift"), for: .normal)
+                button.accessibilityLabel = "Shift"; button.accessibilityValue = caps ? "Caps lock on" : shift ? "On" : "Off"
+                button.accessibilityHint = "Activate twice quickly to turn on caps lock."
             case "delete":
                 button.setImage(UIImage(systemName: "delete.left"), for: .normal); button.accessibilityLabel = "Delete"
                 let hold = UILongPressGestureRecognizer(target: self, action: #selector(holdDelete(_:))); hold.minimumPressDuration = 0.35; button.addGestureRecognizer(hold)
-            case "space": button.setTitle("space", for: .normal)
+            case "space": button.setTitle("space", for: .normal); button.accessibilityLabel = "Space"
             case "return": button.setTitle(textDocumentProxy.returnKeyType == .search ? "search" : "return", for: .normal)
+            case "123", "#+=", "ABC":
+                button.setTitle(value, for: .normal)
+                button.accessibilityLabel = value == "123" ? "Show numbers and punctuation" : value == "#+=" ? "Show more symbols" : "Show letters"
             default: button.setTitle(layout == 0 && shift ? value.uppercased() : value, for: .normal)
             }
             if value != "globe" { button.addAction(UIAction { [weak self] _ in self?.key(value) }, for: .touchUpInside) }
