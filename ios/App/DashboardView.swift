@@ -51,7 +51,7 @@ struct HomeView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         Label("One account, across your devices", systemImage: "person.crop.circle").font(.headline)
                         Text("Sign in securely with your email to dictate and sync your vocabulary. Audio is sent only when you choose to dictate.").foregroundStyle(.secondary)
-                        Button { Task { await model.signIn() } } label: { Text(model.busy ? "Opening sign-in…" : "Sign in to WoVoice").frame(maxWidth: .infinity) }
+                        Button { Task { await model.signIn() } } label: { Text(model.busy ? "Opening sign-in…" : "Sign in to WoVoice").foregroundStyle(Color(uiColor: .systemBackground)).frame(maxWidth: .infinity) }
                             .buttonStyle(.borderedProminent).disabled(model.busy).accessibilityIdentifier("signIn")
                     }.card()
                 } else {

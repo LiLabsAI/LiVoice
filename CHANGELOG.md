@@ -4,6 +4,7 @@
 
 ### iOS — in development
 
+- Fixed an unreadable sign-in button label in dark mode.
 - Fixed a Swift 6 actor-isolation crash when microphone buffers arrive on the realtime audio thread. App restart clears orphaned Live Activities, and expired activities show that the session ended.
 - Fixed dictation in empty text fields and false insertion-success messages when an editor rejects text. Live Activity controls now open WoVoice to stop the microphone reliably.
 - Added a native iPhone/iPad workspace with dictation, History, Dictionary, analytics, account settings, device sessions, and existing Cloudflare sync.
