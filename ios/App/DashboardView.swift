@@ -224,6 +224,7 @@ struct SettingsView: View {
     @State private var historyOff = false
     @State private var resetAnalytics = false
     @State private var clearLocal = false
+    @State private var export: HistoryExport?
     var body: some View {
         Form {
             Section("Account") {
@@ -261,7 +262,8 @@ struct SettingsView: View {
                     Toggle("Keep local history", isOn: $model.keepHistory).onChange(of: model.keepHistory) { model.savePreferences() }
                     Toggle("Show cost estimates", isOn: $model.costEstimates).onChange(of: model.costEstimates) { model.savePreferences() }
                     Toggle("Correction suggestions", isOn: $model.learning).onChange(of: model.learning) { model.savePreferences() }
-                    ShareLink("Export history", item: model.history.compactMap { $0.payload?["text"]?.string }.joined(separator: "\n\n"))
+                    Button("Export history", systemImage: "square.and.arrow.up") { export = HistoryExport(text: historyExport) }
+                        .disabled(model.history.isEmpty)
                     Button("Reset analytics", role: .destructive) { resetAnalytics = true }
                     Button("Clear all local data", role: .destructive) { clearLocal = true }
                     Button("Delete account", role: .destructive) { deleting = true }.disabled(model.busy)
@@ -274,6 +276,9 @@ struct SettingsView: View {
                 LabeledContent("Version", value: "1.0.0 (1)")
             }
         }.navigationTitle("Settings")
+            .sheet(item: $export) { item in
+                HistoryShareSheet(text: item.text).presentationDetents([.medium, .large])
+            }
             .confirmationDialog("Allow nearby editor text?", isPresented: $nearbyConsent, titleVisibility: .visible) {
                 Button("Allow nearby text") { model.preferences.level = .nearby; model.savePreferences() }
                 Button("Cancel", role: .cancel) { }
@@ -283,6 +288,23 @@ struct SettingsView: View {
             .confirmationDialog("Reset analytics on all synced devices?", isPresented: $resetAnalytics, titleVisibility: .visible) { Button("Reset analytics", role: .destructive) { model.clear(.analytics) } }
             .confirmationDialog("Clear all local data and sign out?", isPresented: $clearLocal, titleVisibility: .visible) { Button("Clear local data", role: .destructive) { Task { await model.clearLocalData() } } } message: { Text("Removes this device’s history, vocabulary, analytics, settings, and secure sign-in. Your cloud data remains.") }
     }
+    private var historyExport: String { model.history.compactMap { $0.payload?["text"]?.string }.joined(separator: "\n\n") }
+}
+private struct HistoryExport: Identifiable {
+    let id = UUID()
+    let text: String
+}
+private struct HistoryShareSheet: UIViewControllerRepresentable {
+    let text: String
+    @Environment(\.dismiss) private var dismiss
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        controller.completionWithItemsHandler = { _, _, _, _ in
+            Task { @MainActor in dismiss() }
+        }
+        return controller
+    }
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 struct SessionsView: View {
     @Bindable var model: AppModel

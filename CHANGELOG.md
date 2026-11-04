@@ -4,6 +4,7 @@
 
 ### iOS — in development
 
+- Fixed clipped History export sharing on iPad. Export now uses a complete system share sheet and keeps its text stable while sharing.
 - Prevented repeated Retry commands from starting duplicate uploads while a dictation request is already processing.
 - Improved the keyboard at large accessibility text sizes so mode switches, Finish and Cancel remain reachable. Added descriptive keyboard accessibility labels and Shift/caps-lock state.
 - Fixed an unreadable sign-in button label in dark mode.
