@@ -849,4 +849,75 @@ private final class FixtureAuthentication: AccountAuthenticating {
         #expect(model.dictionary.count == 1 && model.lastSyncedAt == nil)
         #expect(model.message == "Please try again." && !model.microphoneActive)
     }
+    @Test func revokingTheCurrentDeviceSignsOutWithoutFetchingAgainAndKeepsLocalRecords() async throws {
+        let release = DispatchSemaphore(value: 0); defer { release.signal() }
+        FixtureProtocol.router.configure { request,_ in
+            if request.httpMethod == "GET" { return (200,Data(#"{"sessions":[{"id":"current-device","deviceName":"Simulator","createdAt":1,"lastSeenAt":2,"current":1}]}"#.utf8)) }
+            _ = release.wait(timeout: .now() + 2); return (200,Data())
+        }
+        let persistence = MemorySessionStore(); let capture = RetryCapture()
+        let model = try AppModel(api: api(), persistence: persistence, capture: capture, databaseURL: URL(fileURLWithPath: ":memory:"))
+        try model.account.accept(tokens())
+        try model.store.save(owner: "alice", record: .init(id: "word", type: .dictionary, payload: RecordPayload.dictionary("Keep this")))
+        try model.reload(); await model.loadSessions(); try await capture.startSession()
+        let device = try #require(model.sessions.first)
+        let revocation = Task { await model.revoke(device) }
+        for _ in 0..<100 where FixtureProtocol.router.captured().count == 1 { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(FixtureProtocol.router.captured().count == 2)
+        #expect(!model.microphoneActive && model.busy)
+        release.signal(); await revocation.value
+        #expect(model.owner == nil && persistence.value == nil && !model.microphoneActive && !model.busy)
+        #expect(model.sessions.isEmpty && model.message == nil)
+        #expect(FixtureProtocol.router.captured().map { $0.url?.path } == ["/v1/me/sessions", "/v1/me/sessions/current-device"])
+        #expect(try model.store.records(owner: "alice", type: .dictionary).count == 1)
+    }
+    @Test func revokingAnotherDeviceReloadsItsListWithoutSigningOutLocally() async throws {
+        FixtureProtocol.router.configure { request,index in
+            if request.httpMethod == "DELETE" { return (200,Data()) }
+            let devices = index == 1 ? #"[{"id":"other-device","deviceName":"Other device","createdAt":1,"lastSeenAt":2,"current":0},{"id":"current-device","deviceName":"Simulator","createdAt":1,"lastSeenAt":2,"current":1}]"# : #"[{"id":"current-device","deviceName":"Simulator","createdAt":1,"lastSeenAt":2,"current":1}]"#
+            return (200,Data("{\"sessions\":\(devices)}".utf8))
+        }
+        let model = try AppModel(api: api(), persistence: MemorySessionStore(), capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"))
+        try model.account.accept(tokens()); await model.loadSessions()
+        let device = try #require(model.sessions.first(where: { $0.current == 0 }))
+        await model.revoke(device)
+        #expect(model.owner == "alice" && !model.busy && model.message == nil)
+        #expect(model.sessions.map(\.id) == ["current-device"])
+        #expect(FixtureProtocol.router.captured().map { $0.httpMethod } == ["GET", "DELETE", "GET"])
+    }
+    @Test func deviceRevocationRejectsAListFromAReplacedSession() async throws {
+        for owner in ["alice", "bob"] {
+            FixtureProtocol.router.configure { request,_ in
+                if request.httpMethod == "GET" { return (200,Data(#"{"sessions":[{"id":"old-device","deviceName":"Old session","createdAt":1,"lastSeenAt":2,"current":1}]}"#.utf8)) }
+                return (200,Data())
+            }
+            let persistence = MemorySessionStore()
+            let model = try AppModel(api: api(), persistence: persistence, capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"))
+            try model.account.accept(tokens()); try model.reload(); await model.loadSessions()
+            let old = try #require(model.sessions.first)
+            try model.account.accept(tokens("replacement", owner: owner)); try model.reload()
+            #expect(model.sessions.isEmpty)
+            await model.revoke(old)
+            #expect(model.owner == owner && persistence.value?.tokens.accessToken == "replacement")
+            #expect(FixtureProtocol.router.captured().allSatisfy { $0.httpMethod == "GET" })
+        }
+    }
+    @Test func repeatedDeviceRevocationSendsOnlyOneDelete() async throws {
+        let release = DispatchSemaphore(value: 0); defer { release.signal(); release.signal() }
+        FixtureProtocol.router.configure { request,_ in
+            if request.httpMethod == "GET" { return (200,Data(#"{"sessions":[{"id":"other-device","deviceName":"Other device","createdAt":1,"lastSeenAt":2,"current":0}]}"#.utf8)) }
+            _ = release.wait(timeout: .now() + 2); return (200,Data())
+        }
+        let model = try AppModel(api: api(), persistence: MemorySessionStore(), capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"))
+        try model.account.accept(tokens()); await model.loadSessions()
+        let device = try #require(model.sessions.first)
+        let first = Task { await model.revoke(device) }
+        for _ in 0..<100 where FixtureProtocol.router.captured().count == 1 { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(FixtureProtocol.router.captured().count >= 2)
+        let second = Task { await model.revoke(device) }
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(model.busy && FixtureProtocol.router.captured().filter { $0.httpMethod == "DELETE" }.count == 1)
+        release.signal(); release.signal(); await first.value; await second.value
+        #expect(!model.busy && model.owner == "alice")
+    }
 }

@@ -39,6 +39,7 @@ import WoVoiceCore
     var costEstimates = true
     var learning = true
     var sessions: [DeviceSession] = []
+    private var sessionListIdentity: UUID?
     var undoRecord: CloudRecord?
     private var undoTask: Task<Void, Never>?
     private var undoOwner: String?
@@ -107,6 +108,7 @@ import WoVoiceCore
     }
     func reload() throws {
         if loadedOwner != owner { lastText = ""; profile = nil; sessions = []; loadedOwner = owner }
+        if sessionListIdentity != account.sessionIdentity { sessions = []; sessionListIdentity = nil }
         if undoOwner != owner { undoTask?.cancel(); undoRecord = nil; undoOwner = nil }
         guard let owner else {
             history = []; dictionary = []; analytics = []; preferences = .init(); cloudSettings = .init()
@@ -184,18 +186,33 @@ import WoVoiceCore
     }
     func loadSessions() async {
         nonisolated struct Response: Decodable, Sendable { let sessions: [DeviceSession] }
+        guard owner != nil else { sessions = []; sessionListIdentity = nil; return }
+        let expected = account.sessionIdentity
         do {
             let result: Response = try await account.call { try await account.api.request("/v1/me/sessions", token: $0) }
-            sessions = result.sessions
-        } catch { message = error.localizedDescription }
+            guard account.sessionIdentity == expected else { throw CancellationError() }
+            sessions = result.sessions; sessionListIdentity = expected
+        } catch is CancellationError { }
+        catch { message = error.localizedDescription }
     }
     func revoke(_ device: DeviceSession) async {
-        do {
-            let id = device.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? device.id
-            try await account.call { try await account.api.empty("/v1/me/sessions/\(id)", method: "DELETE", token: $0) }
-            if device.current == 1 { stopSession(); try account.clear(); try reload() }
+        guard !busy, owner != nil else { return }
+        let expected = account.sessionIdentity
+        guard sessionListIdentity == expected, let current = sessions.first(where: { $0.id == device.id }) else {
             await loadSessions()
-        } catch { message = error.localizedDescription }
+            if account.sessionIdentity == expected, owner != nil { message = "The device list changed. Review it and try again." }
+            return
+        }
+        message = nil; busy = true; defer { busy = false }
+        if current.current == 1 { stopSession() }
+        do {
+            let id = current.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? current.id
+            try await account.call { try await account.api.empty("/v1/me/sessions/\(id)", method: "DELETE", token: $0) }
+            guard account.sessionIdentity == expected else { throw CancellationError() }
+            if current.current == 1 { try account.clear(); try reload(); return }
+            await loadSessions()
+        } catch is CancellationError { }
+        catch { message = error.localizedDescription }
     }
     func clearLocalData() async {
         guard !busy else { return }

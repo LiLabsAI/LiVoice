@@ -76,7 +76,7 @@ private nonisolated final class DevelopmentServer: URLProtocol, @unchecked Senda
                 let applied = items.map { ["id": $0["id"] ?? "", "type": $0["type"] ?? "", "version": ($0["baseVersion"] as? Int ?? 0) + 1] }
                 data = (try? JSONSerialization.data(withJSONObject: ["applied": applied])) ?? Data()
             }
-        case "/v1/me/sessions": data = Data(#"{"sessions":[{"id":"fixture-device","deviceName":"iPhone simulator","createdAt":1793700000000,"lastSeenAt":1793700000000,"current":1}]}"#.utf8)
+        case "/v1/me/sessions": data = Data(#"{"sessions":[{"id":"fixture-device","deviceName":"iPhone simulator","createdAt":1793700000000,"lastSeenAt":1793700000000,"current":1},{"id":"fixture-other","deviceName":"Sample Mac","createdAt":1793700000000,"lastSeenAt":1793700000000,"current":0}]}"#.utf8)
         default: code = 404; data = Data(#"{"error":{"code":"FIXTURE_ONLY","message":"This action is not part of the synthetic test server.","retryable":false}}"#.utf8)
         }
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)

@@ -331,11 +331,13 @@ struct SessionsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(device.deviceName).font(.headline)
                 Text(device.current == 1 ? "This device" : "Last active \(Date(timeIntervalSince1970: device.lastSeenAt/1000).formatted())").font(.caption).foregroundStyle(.secondary)
-                Button("Sign out this device", role: .destructive) { selected = device }
+                Button(device.current == 1 ? "Sign out this device" : "Sign out device", role: .destructive) { selected = device }.disabled(model.busy)
             }.padding(.vertical, 6)
         }.navigationTitle("Signed-in devices").task { await model.loadSessions() }
-            .confirmationDialog("Sign out this device?", isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } }), titleVisibility: .visible) {
+            .confirmationDialog(selected?.current == 1 ? "Sign out this device?" : "Sign out \(selected?.deviceName ?? "device")?", isPresented: Binding(get: { selected != nil }, set: { if !$0 { selected = nil } }), titleVisibility: .visible) {
                 Button("Sign out device", role: .destructive) { if let selected { Task { await model.revoke(selected) } }; selected = nil }
+            } message: {
+                Text(selected?.current == 1 ? "Voice input and sync will stop on this device. Your local history and vocabulary remain." : "That device will need to sign in again. Its local data remains on that device.")
             }
     }
 }
