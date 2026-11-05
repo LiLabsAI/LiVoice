@@ -24,6 +24,8 @@ For isolated development checks, launch a Debug build with `--fixture`. The visi
 
 Add `--fixture-large-text` to preview the main app at the largest accessibility text size without changing system settings. `--fixture-shortcut` queues the same foreground handoff used by the App Shortcut. These flags require a fixture mode and do not prove system shortcut routing or change the keyboard extension’s system text size.
 
+Add `--fixture-sync-limit` to `--fixture` to exercise a full cloud vocabulary with the local fake service. Settings shows the warning while the seeded vocabulary entry stays local; this does not alter any production limit or account.
+
 [Distribution and privacy notes](DISTRIBUTION.md) describe provisioning, data declarations and remaining release gates.
 
 For a physical device select your own Apple development team for all targets, provision the `group.com.aliahad.wovoice.ios` App Group, and enable the same App Group on the app and keyboard. Never put signing keys or profiles in this repository. The default identifiers are `com.aliahad.wovoice.ios` and `com.aliahad.wovoice.ios.keyboard`; customize `WOVOICE_APP_GROUP` consistently if those identifiers belong to another team.
@@ -38,6 +40,8 @@ For a physical device select your own Apple development team for all targets, pr
 6. Stop the session in WoVoice, use **Open to stop** in its Dynamic Island/Lock Screen activity, or let it expire. The activity link opens WoVoice to release the microphone; a locked phone may require unlocking. Audio interruptions and force-quit end it. Expired or unavailable sessions show setup guidance.
 
 Voice and typing modes include the field's Return action (for example, Send, Search, Next or Done). The receiving app decides what that action does. A multiline editor receives a newline. Return is disabled during dictation/insertion checks and when an empty field requests it.
+
+Settings → Cloud sync shows the last sync time and any cloud limit or remaining-work warning. New vocabulary that cannot fit in the cloud stays on this device; other records continue syncing. A later successful retry clears the warning. Failed requests retain the previous sync time.
 
 iOS has no Android accessibility bubble. Password fields, phone pads, and apps that reject third-party keyboards use the system keyboard. The keyboard cannot identify WhatsApp/Mail or read whole conversations. Automatic context uses exposed field traits and, only with consent, bounded cursor snippets. No unsupported URL-opening or private APIs are used.
 

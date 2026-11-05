@@ -553,4 +553,86 @@ private final class RetryCapture: CaptureEngine {
         let record = try #require(store.records(owner: "alice", type: .dictionary, includeDeleted: true).first)
         #expect(record.deleted && record.version == 5)
     }
+    @Test func fullCloudVocabularyKeepsNewWordsLocalWhileOtherRecordsSyncAndClearsWarningAfterRecovery() async throws {
+        let pull = Data(#"{"nextCursor":0,"hasMore":false,"settings":{"historySyncEnabled":true,"historyRetentionDays":null,"legacyVault":false},"items":[]}"#.utf8)
+        let warning = "Cloud vocabulary is full. New words remain on this device."
+        FixtureProtocol.router.configure { request,_ in
+            if request.httpMethod == "GET" { return (200, pull) }
+            let batch = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any]
+            let items = batch?["items"] as? [[String: Any]] ?? []
+            if items.contains(where: { $0["id"] as? String == "word" }) {
+                return (409, Data("{\"error\":{\"code\":\"STORAGE_LIMIT_REACHED\",\"message\":\"\(warning)\",\"retryable\":false}}".utf8))
+            }
+            let applied = items.map { ["id": $0["id"] ?? "", "type": $0["type"] ?? "", "version": ($0["baseVersion"] as? Int ?? 0) + 1] }
+            return (200, (try? JSONSerialization.data(withJSONObject: ["applied": applied])) ?? Data())
+        }
+        let model = try AppModel(api: api(), persistence: MemorySessionStore(), capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"))
+        try model.account.accept(tokens()); try model.reload()
+        let store = model.store
+        let service = SyncService(account: model.account, store: store)
+        try store.save(owner: "alice", record: .init(id: "word", type: .dictionary, payload: RecordPayload.dictionary("Ahad")))
+        try store.save(owner: "alice", record: .init(id: "edit", type: .dictionary, version: 2, payload: RecordPayload.dictionary("Rahman")))
+        try store.save(owner: "alice", record: .init(id: "deleted", type: .dictionary, version: 1, deleted: true, payload: nil))
+        try store.save(owner: "alice", record: .init(id: "history", type: .history, payload: ["text": .string("Synthetic history")]))
+        try store.save(owner: "alice", record: .init(id: "usage", type: .analytics, payload: ["createdAtMs": .number(1)]))
+        try await service.run(); try model.reload()
+        #expect(try store.pending(owner: "alice", historyEnabled: true).map(\.record.id) == ["word"])
+        #expect(try store.records(owner: "alice", type: .dictionary).count == 2)
+        #expect(try store.metadata("syncWarning", owner: "alice", default: "") == warning)
+        let lastSync: Date? = try store.metadata("lastSync", owner: "alice", default: nil as Date?)
+        #expect(lastSync != nil)
+        #expect(model.lastSyncedAt == lastSync && model.syncWarning == warning)
+        try model.account.accept(tokens(owner: "bob")); try model.reload()
+        #expect(model.lastSyncedAt == nil && model.syncWarning == nil)
+        try model.account.accept(tokens()); try model.reload()
+        #expect(model.lastSyncedAt == lastSync && model.syncWarning == warning)
+        FixtureProtocol.router.configure { request,_ in
+            if request.httpMethod == "GET" { return (200, pull) }
+            return (200,Data(#"{"applied":[{"id":"word","type":"dictionary","version":1}]}"#.utf8))
+        }
+        try await service.run(); try model.reload()
+        #expect(try store.pending(owner: "alice", historyEnabled: true).isEmpty)
+        #expect(try store.metadata("syncWarning", owner: "alice", default: "").isEmpty)
+        #expect(model.syncWarning == nil && model.lastSyncedAt != nil)
+    }
+    @Test func failedSyncKeepsThePreviousSyncTimeAndSigningOutHidesIt() async throws {
+        FixtureProtocol.router.configure { _,_ in (503, Data(#"{"error":{"code":"TEMPORARY","message":"Try again later.","retryable":true}}"#.utf8)) }
+        let model = try AppModel(api: api(), persistence: MemorySessionStore(), capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"))
+        try model.account.accept(tokens())
+        let previous = Date(timeIntervalSince1970: 1_790_000_000)
+        try model.store.setMetadata("lastSync", owner: "alice", value: previous)
+        try model.store.setMetadata("syncWarning", owner: "alice", value: "Previous cloud warning")
+        try model.reload()
+        await model.sync()
+        #expect(model.lastSyncedAt == previous && model.syncWarning == "Previous cloud warning")
+        #expect(model.message == "Try again later.")
+        try model.account.clear()
+        #expect(model.lastSyncedAt == nil && model.syncWarning == nil)
+    }
+    @Test func largeOfflineQueueReportsRemainingWorkAndFinishesOnTheNextSync() async throws {
+        FixtureProtocol.router.configure { request,_ in
+            if request.httpMethod == "GET" {
+                return (200, Data(#"{"nextCursor":0,"hasMore":false,"settings":{"historySyncEnabled":true,"historyRetentionDays":null,"legacyVault":false},"items":[]}"#.utf8))
+            }
+            let batch = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any]
+            let items = batch?["items"] as? [[String: Any]] ?? []
+            let applied = items.map { ["id": $0["id"] ?? "", "type": $0["type"] ?? "", "version": ($0["baseVersion"] as? Int ?? 0) + 1] }
+            return (200, (try? JSONSerialization.data(withJSONObject: ["applied": applied])) ?? Data())
+        }
+        let account = try AccountSession(api: api(), persistence: MemorySessionStore()); try account.accept(tokens())
+        let store = try RecordStore(url: URL(fileURLWithPath: ":memory:"))
+        try store.transaction {
+            for index in 0..<2001 {
+                try store.save(owner: "alice", record: .init(id: "history-\(index)", type: .history, payload: ["text": .string("Synthetic history \(index)")]))
+            }
+        }
+        let service = SyncService(account: account, store: store)
+        try await service.run()
+        #expect(try store.pending(owner: "alice", historyEnabled: true).count == 1)
+        #expect(FixtureProtocol.router.captured().filter { $0.httpMethod == "POST" }.count == 20)
+        #expect(try store.metadata("syncWarning", owner: "alice", default: "").contains("waiting"))
+        try await service.run()
+        #expect(try store.pending(owner: "alice", historyEnabled: true).isEmpty)
+        #expect(try store.metadata("syncWarning", owner: "alice", default: "").isEmpty)
+    }
 }

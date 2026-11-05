@@ -34,6 +34,7 @@ final class SyncService {
         }
         var conflicts = 0
         var skipNewDictionary = false
+        var warning = ""
         for _ in 0..<20 {
             try checkOwner()
             let settings = try store.metadata("cloudSettings", owner: owner, default: CloudSettings())
@@ -61,9 +62,17 @@ final class SyncService {
                 try checkOwner()
                 if skipNewDictionary { throw error }
                 skipNewDictionary = true
-                try store.setMetadata("syncWarning", owner: owner, value: error.message)
+                warning = error.message
             }
         }
-        try store.setMetadata("lastSync", owner: owner, value: Date.now)
+        try checkOwner()
+        let settings = try store.metadata("cloudSettings", owner: owner, default: CloudSettings())
+        if try !store.pending(owner: owner, historyEnabled: settings.historySyncEnabled, skipNewDictionary: skipNewDictionary).isEmpty {
+            warning = [warning, "Some changes are still waiting. Tap Sync now to continue."].filter { !$0.isEmpty }.joined(separator: " ")
+        }
+        try store.transaction {
+            try store.setMetadata("syncWarning", owner: owner, value: warning)
+            try store.setMetadata("lastSync", owner: owner, value: Date.now)
+        }
     }
 }

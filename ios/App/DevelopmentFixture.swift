@@ -62,8 +62,14 @@ private nonisolated final class DevelopmentServer: URLProtocol, @unchecked Senda
         case "/v2/sync/batch":
             let body = Self.body(request)
             let batch = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
-            let items = (batch?["items"] as? [[String: Any]] ?? []).map { ["id": $0["id"] ?? "", "type": $0["type"] ?? "", "version": ($0["baseVersion"] as? Int ?? 0) + 1] }
-            data = (try? JSONSerialization.data(withJSONObject: ["applied": items])) ?? Data()
+            let items = batch?["items"] as? [[String: Any]] ?? []
+            if ProcessInfo.processInfo.arguments.contains("--fixture-sync-limit"), items.contains(where: { $0["type"] as? String == "dictionary" && $0["baseVersion"] as? Int == 0 && $0["deleted"] as? Bool != true }) {
+                code = 409
+                data = Data(#"{"error":{"code":"STORAGE_LIMIT_REACHED","message":"Cloud vocabulary is full. New words remain on this device.","retryable":false}}"#.utf8)
+            } else {
+                let applied = items.map { ["id": $0["id"] ?? "", "type": $0["type"] ?? "", "version": ($0["baseVersion"] as? Int ?? 0) + 1] }
+                data = (try? JSONSerialization.data(withJSONObject: ["applied": applied])) ?? Data()
+            }
         case "/v1/me/sessions": data = Data(#"{"sessions":[{"id":"fixture-device","deviceName":"iPhone simulator","createdAt":1793700000000,"lastSeenAt":1793700000000,"current":1}]}"#.utf8)
         default: code = 404; data = Data(#"{"error":{"code":"FIXTURE_ONLY","message":"This action is not part of the synthetic test server.","retryable":false}}"#.utf8)
         }

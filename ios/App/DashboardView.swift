@@ -263,6 +263,10 @@ struct SettingsView: View {
                         Text("Never").tag(0); Text("30 days").tag(30); Text("90 days").tag(90); Text("1 year").tag(365)
                     }
                     Button(model.syncing ? "Syncing…" : "Sync now") { Task { await model.sync() } }.disabled(model.syncing)
+                    if let lastSyncedAt = model.lastSyncedAt {
+                        Text("Last synced \(lastSyncedAt.formatted(date: .abbreviated, time: .shortened))").font(.caption).foregroundStyle(.secondary)
+                    } else { Text("Not synced yet on this device").font(.caption).foregroundStyle(.secondary) }
+                    if let warning = model.syncWarning { Text(warning).font(.callout).foregroundStyle(.orange) }
                 } header: { Text("Cloud sync") } footer: { Text("Vocabulary and analytics sync with your account. History follows your choice on every device. The server encrypts stored records.") }
                 Section("Data") {
                     Toggle("Keep local history", isOn: $model.keepHistory).onChange(of: model.keepHistory) { model.savePreferences() }

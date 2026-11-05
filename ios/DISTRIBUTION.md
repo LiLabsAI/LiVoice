@@ -1,6 +1,6 @@
 # iOS signing and privacy review
 
-This is a development build, not an App Store or TestFlight release. The simulator app and unsigned device Release targets build successfully. Physical iPhone audio behavior, live authentication, and distribution provisioning remain acceptance gates in `IMPLEMENTATION.md`.
+This is a development build, not an App Store or TestFlight release. The simulator app and unsigned device Release targets build successfully, and live email sign-in has returned successfully to the iOS app. Physical iPhone audio behavior, fresh account-deletion verification, and distribution provisioning remain acceptance gates in `IMPLEMENTATION.md`.
 
 ## Signing
 
