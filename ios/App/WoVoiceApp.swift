@@ -24,7 +24,12 @@ import SwiftUI
                     .onOpenURL { url in
                         if model.handleSessionURL(url) { AppRuntime.shared.cancelKeyboardSessionRequest() }
                     }
-                    .onChange(of: scenePhase, initial: true) { _, _ in startRequestedSession(model) }
+                    .onChange(of: scenePhase, initial: true) { _, _ in
+                        startRequestedSession(model)
+                        // A brief inactive state must not cancel the in-flight
+                        // refresh and lose the next activation. This never starts audio.
+                        if scenePhase == .active { Task { await model.refreshForForeground() } }
+                    }
                     .onChange(of: AppRuntime.shared.pendingKeyboardSession) { _, _ in startRequestedSession(model) }
             }
             else { ContentUnavailableView("WoVoice couldn’t open", systemImage: "externaldrive.badge.exclamationmark", description: Text(startupError ?? "Please restart the app.")) }

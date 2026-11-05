@@ -46,6 +46,7 @@ private final class FixtureCapture: CaptureEngine {
     func stopSession() { started = nil; active = false }
 }
 private nonisolated final class DevelopmentServer: URLProtocol, @unchecked Sendable {
+    private static let profileRequests = FixtureRequestCounter()
     static let tokens = Data(#"{"accessToken":"fixture-access","refreshToken":"fixture-refresh","accessExpiresIn":900,"refreshExpiresIn":2592000,"user":{"id":"fixture","email":"sample@example.test","role":"user","accountStatus":{"state":"active","supportEmail":"support@example.test"}}}"#.utf8)
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -56,8 +57,9 @@ private nonisolated final class DevelopmentServer: URLProtocol, @unchecked Senda
         switch path {
         case "/v1/me":
             let restricted = ProcessInfo.processInfo.arguments.contains("--fixture-restricted")
+            let remaining = ProcessInfo.processInfo.arguments.contains("--fixture-foreground") && Self.profileRequests.next() > 1 ? 300 : 600
             data = Data("""
-            {"user":{"id":"fixture","email":"sample@example.test","role":"user","accountStatus":{"state":"\(restricted ? "suspended" : "active")","publicMessage":"\(restricted ? "Voice input and cloud sync are temporarily unavailable. Offline typing and local data remain available." : "")","supportEmail":"support@example.test"}},"quota":{"limitAudioSeconds":600,"remainingAudioSeconds":600,"resetAt":1900000000000}}
+            {"user":{"id":"fixture","email":"sample@example.test","role":"user","accountStatus":{"state":"\(restricted ? "suspended" : "active")","publicMessage":"\(restricted ? "Voice input and cloud sync are temporarily unavailable. Offline typing and local data remain available." : "")","supportEmail":"support@example.test"}},"quota":{"limitAudioSeconds":600,"remainingAudioSeconds":\(remaining),"resetAt":1900000000000}}
             """.utf8)
         case "/v1/transcriptions": data = Data("""
         {"text":"I would like to meet Professor Rahman tomorrow.","rawText":"i would like to meet professor rahman tomorrow","polished":true,"asrModel":"fixture-whisper","requestId":"\(UUID().uuidString)","timingsMs":{"asr":120,"polish":80,"total":200},"usage":null}
@@ -89,6 +91,11 @@ private nonisolated final class DevelopmentServer: URLProtocol, @unchecked Senda
         while stream.hasBytesAvailable { let n = stream.read(&bytes,maxLength: bytes.count); if n <= 0 { break }; data.append(contentsOf: bytes.prefix(n)) }
         return data
     }
+}
+private nonisolated final class FixtureRequestCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    func next() -> Int { lock.lock(); defer { lock.unlock() }; count += 1; return count }
 }
 struct FixtureEditorsView: View {
     @State private var report = "Bold preserved: yes"

@@ -54,6 +54,7 @@ import WoVoiceCore
     private var retryAudio: (wav: Data, duration: Double, expiresAt: Date, attempts: Int)?
     private var observers: [NSObjectProtocol] = []
     private var loadedOwner: String?
+    private var refreshingForeground = false
     var owner: String? { account.user?.id }
     var accountRestriction: String? { account.restrictionMessage }
     var recording: Bool { status.phase == "recording" }
@@ -136,16 +137,25 @@ import WoVoiceCore
         } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin { }
         catch { message = error.localizedDescription }
     }
-    func refreshProfile() async {
-        guard owner != nil, !refreshingProfile else { return }
+    @discardableResult func refreshProfile() async -> Bool {
+        guard owner != nil, !refreshingProfile else { return false }
         refreshingProfile = true; defer { refreshingProfile = false }
         let expected = account.sessionIdentity
         do {
             let next: Profile = try await account.call { try await account.api.request("/v1/me", token: $0) }
             guard account.sessionIdentity == expected else { throw CancellationError() }
             try account.updateUser(next.user); profile = next
+            return true
         } catch is CancellationError { }
         catch { message = error.localizedDescription; if owner == nil { stopSession(); try? reload() } }
+        return false
+    }
+    func refreshForForeground() async {
+        guard owner != nil, !busy, !refreshingForeground else { return }
+        refreshingForeground = true; defer { refreshingForeground = false }
+        let expected = account.sessionIdentity
+        guard await refreshProfile(), !Task.isCancelled, account.sessionIdentity == expected else { return }
+        await sync()
     }
     func logout() async {
         guard !busy else { return }

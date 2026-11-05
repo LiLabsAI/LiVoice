@@ -798,4 +798,55 @@ private final class FixtureAuthentication: AccountAuthenticating {
         await model.startSession(keyboard: false)
         #expect(capture.starts == 1 && model.microphoneActive)
     }
+    @Test func foregroundRefreshLoadsRemoteChangesWithoutStartingTheMicrophone() async throws {
+        let user = try JSONEncoder().encode(tokens().user)
+        let profile = Data("{\"user\":\(String(decoding:user,as:UTF8.self))}".utf8)
+        FixtureProtocol.router.configure { request,_ in
+            if request.url?.path == "/v1/me" { return (200, profile) }
+            return (200, Data(#"{"nextCursor":1,"hasMore":false,"settings":{"historySyncEnabled":true,"historyRetentionDays":null,"legacyVault":false},"items":[{"id":"remote-word","type":"dictionary","version":1,"deleted":false,"payload":{"term":"Foreground word","normalizedTerm":"foreground word","status":"confirmed"}}]}"#.utf8))
+        }
+        let capture = RetryCapture()
+        let model = try AppModel(api: api(), persistence: MemorySessionStore(), capture: capture, databaseURL: URL(fileURLWithPath: ":memory:"))
+        await model.refreshForForeground()
+        #expect(FixtureProtocol.router.captured().isEmpty)
+        try model.account.accept(tokens()); try model.reload()
+        await model.refreshForForeground()
+        #expect(model.profile?.user.id == "alice")
+        #expect(model.dictionary.first?.payload?["term"]?.string == "Foreground word")
+        #expect(model.lastSyncedAt != nil && !model.syncing && !model.refreshingProfile)
+        #expect(capture.starts == 0 && !model.microphoneActive)
+        #expect(FixtureProtocol.router.captured().map { $0.url?.path } == ["/v1/me", "/v2/sync"])
+    }
+    @Test func foregroundRefreshSkipsAuthenticationWorkAndCoalescesRepeatedActivation() async throws {
+        let release = DispatchSemaphore(value: 0); defer { release.signal() }
+        let user = try JSONEncoder().encode(tokens().user)
+        let profile = Data("{\"user\":\(String(decoding:user,as:UTF8.self))}".utf8)
+        FixtureProtocol.router.configure { request,_ in
+            if request.url?.path == "/v1/me" { _ = release.wait(timeout: .now() + 2); return (200,profile) }
+            return (200,Data(#"{"nextCursor":0,"hasMore":false,"settings":{"historySyncEnabled":true,"historyRetentionDays":null,"legacyVault":false},"items":[]}"#.utf8))
+        }
+        let model = try AppModel(api: api(), persistence: MemorySessionStore(), capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"))
+        try model.account.accept(tokens()); model.busy = true
+        await model.refreshForForeground()
+        #expect(FixtureProtocol.router.captured().isEmpty)
+        model.busy = false
+        let refresh = Task { await model.refreshForForeground() }
+        for _ in 0..<100 where FixtureProtocol.router.captured().isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(FixtureProtocol.router.captured().count == 1)
+        await model.refreshForForeground()
+        #expect(FixtureProtocol.router.captured().count == 1)
+        release.signal(); await refresh.value
+        #expect(FixtureProtocol.router.captured().map { $0.url?.path } == ["/v1/me", "/v2/sync"])
+        #expect(!model.refreshingProfile && !model.microphoneActive)
+    }
+    @Test func failedForegroundProfileRefreshDoesNotUploadOrAdvanceTheSyncTime() async throws {
+        FixtureProtocol.router.configure { _,_ in (503,Data(#"{"error":{"code":"TEMPORARY","message":"Please try again.","retryable":true}}"#.utf8)) }
+        let model = try AppModel(api: api(), persistence: MemorySessionStore(), capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"))
+        try model.account.accept(tokens())
+        try model.store.save(owner: "alice", record: .init(id: "word", type: .dictionary, payload: RecordPayload.dictionary("Keep this")))
+        try model.reload(); await model.refreshForForeground()
+        #expect(FixtureProtocol.router.captured().map { $0.url?.path } == ["/v1/me"])
+        #expect(model.dictionary.count == 1 && model.lastSyncedAt == nil)
+        #expect(model.message == "Please try again." && !model.microphoneActive)
+    }
 }

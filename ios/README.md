@@ -28,6 +28,8 @@ Add `--fixture-sync-limit` to `--fixture` to exercise a full cloud vocabulary wi
 
 Add `--fixture-restricted` to `--fixture` to preview a suspended account with the local service. Voice controls are disabled and a status check remains available. This does not change the real account's status.
 
+Add `--fixture-foreground` to `--fixture` to check app reactivation. The first local profile response shows 10 minutes remaining; returning from the Home Screen fetches a second response showing 5 minutes. It does not change the real quota or start the microphone.
+
 [Distribution and privacy notes](DISTRIBUTION.md) describe provisioning, data declarations and remaining release gates.
 
 For a physical device select your own Apple development team for all targets, provision the `group.com.aliahad.wovoice.ios` App Group, and enable the same App Group on the app and keyboard. Never put signing keys or profiles in this repository. The default identifiers are `com.aliahad.wovoice.ios` and `com.aliahad.wovoice.ios.keyboard`; customize `WOVOICE_APP_GROUP` consistently if those identifiers belong to another team.
@@ -44,6 +46,8 @@ For a physical device select your own Apple development team for all targets, pr
 Voice and typing modes include the field's Return action (for example, Send, Search, Next or Done). The receiving app decides what that action does. A multiline editor receives a newline. Return is disabled during dictation/insertion checks and when an empty field requests it.
 
 Settings → Cloud sync shows the last sync time and any cloud limit or remaining-work warning. New vocabulary that cannot fit in the cloud stays on this device; other records continue syncing. A later successful retry clears the warning. Failed requests retain the previous sync time.
+
+Returning to the app automatically refreshes account status, quota and synced records. This does not start recording. Explicit keyboard-session shortcuts retain their separate user-started microphone workflow.
 
 Deleting an account requires fresh email verification for the current session. Cancelling keeps the account and local data. If the session changes during verification, start deletion again from the current account.
 

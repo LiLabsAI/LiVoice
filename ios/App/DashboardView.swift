@@ -22,7 +22,6 @@ struct DashboardView: View {
         .alert("WoVoice", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) {
             Button("OK", role: .cancel) { model.message = nil }
         } message: { Text(model.message ?? "") }
-        .task { await model.refreshProfile(); await model.sync() }
     }
 }
 

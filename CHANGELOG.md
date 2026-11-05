@@ -4,6 +4,7 @@
 
 ### iOS — in development
 
+- Refresh account status, quota and synced records automatically when returning to the app. Repeated activation shares one refresh, and returning never starts the microphone by itself.
 - Account restrictions now stop voice sessions and cloud sync, persist after service errors, and remain visible after restart. Offline typing and local data remain available. Check account status or refresh and sync to pick up restored access.
 - Hardened account deletion against repeated taps and session changes during email verification. Cancelling verification closes it cleanly and preserves the account and local data.
 - Show the last sync time and cloud warnings in Settings. New vocabulary stays local when the cloud limit is reached while other records keep syncing; a healthy retry clears the warning. Large queues report when another sync pass is needed.
