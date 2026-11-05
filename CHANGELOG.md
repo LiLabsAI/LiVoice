@@ -4,6 +4,7 @@
 
 ### iOS — in development
 
+- Added dictation details in History, including date and time, word count, audio duration, recognition model, processing time, and Copy/Delete actions with Undo.
 - Fixed clipped History export sharing on iPad. Export now uses a complete system share sheet and keeps its text stable while sharing.
 - Prevented repeated Retry commands from starting duplicate uploads while a dictation request is already processing.
 - Improved the keyboard at large accessibility text sizes so mode switches, Finish and Cancel remain reachable. Added descriptive keyboard accessibility labels and Shift/caps-lock state.

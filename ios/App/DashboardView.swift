@@ -153,13 +153,18 @@ struct HistoryView: View {
     var body: some View {
         List {
             ForEach(records) { record in
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(record.payload?["text"]?.string ?? "").textSelection(.enabled)
-                    HStack {
-                        Text(Date(timeIntervalSince1970: (record.payload?["createdAtMs"]?.number ?? 0)/1000), style: .date)
-                        Spacer(); Text(record.payload?["polished"]?.bool == true ? "Polished" : "Transcribed")
-                    }.font(.caption).foregroundStyle(.secondary)
-                }.padding(.vertical, 8)
+                NavigationLink {
+                    HistoryDetailView(model: model, recordID: record.id)
+                } label: {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(record.payload?["text"]?.string ?? "")
+                        HStack {
+                            Text(Date(timeIntervalSince1970: (record.payload?["createdAtMs"]?.number ?? 0)/1000), style: .date)
+                            Spacer(); Text(record.payload?["polished"]?.bool == true ? "Polished" : "Transcribed")
+                        }.font(.caption).foregroundStyle(.secondary)
+                    }.padding(.vertical, 8)
+                }
+                    .accessibilityHint("Open dictation details")
                     .contextMenu { Button("Copy", systemImage: "doc.on.doc") { UIPasteboard.general.string = record.payload?["text"]?.string }; ShareLink(item: record.payload?["text"]?.string ?? ""); Button("Delete", role: .destructive) { model.delete(record) } }
                     .swipeActions { Button("Delete", role: .destructive) { model.delete(record) } }
             }

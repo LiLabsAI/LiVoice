@@ -22,6 +22,7 @@
 		744847704268CC1B169A52A3 /* WoVoiceWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CA0BA9F00EBFC575893C1C61 /* WoVoiceWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		751C051C19D5B54893C7E708 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 463F4DD0B167D423A216224C /* Assets.xcassets */; };
 		7A3256E904BF7713753E6BD4 /* KeyboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E4A0199A65064ADA8F3D6D3 /* KeyboardViewController.swift */; };
+		859AD2894942ABEB148272D7 /* HistoryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B18BB8BE3036F98FA28D2179 /* HistoryDetailView.swift */; };
 		8644CFCD1DF831624BB351E5 /* SessionShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = E432B0AD47B5CC14F4FB1F30 /* SessionShortcuts.swift */; };
 		88AE160472C807F716269052 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = EEE3D0AE007A6715E5304D43 /* PrivacyInfo.xcprivacy */; };
 		928171449CB769D82A487AB6 /* AudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D277290D873292C9179EDE3 /* AudioCapture.swift */; };
@@ -95,6 +96,7 @@
 		9E4A0199A65064ADA8F3D6D3 /* KeyboardViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardViewController.swift; sourceTree = "<group>"; };
 		A19A73D81659257187ECCF6C /* WoVoiceKeyboard.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = WoVoiceKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A66B3DD2DBF05BD366E579BA /* AccountAndSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountAndSyncTests.swift; sourceTree = "<group>"; };
+		B18BB8BE3036F98FA28D2179 /* HistoryDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryDetailView.swift; sourceTree = "<group>"; };
 		B4709752ECA9C03E716DBDAD /* SessionWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionWidget.swift; sourceTree = "<group>"; };
 		CA0BA9F00EBFC575893C1C61 /* WoVoiceWidgets.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = WoVoiceWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		CC23614C5B4DF8DD067B1DF7 /* SessionActivities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionActivities.swift; sourceTree = "<group>"; };
@@ -180,6 +182,7 @@
 				2D277290D873292C9179EDE3 /* AudioCapture.swift */,
 				6B93A93CC9A783DF0F19DB33 /* DashboardView.swift */,
 				F14711F351034B12CE563F2D /* DevelopmentFixture.swift */,
+				B18BB8BE3036F98FA28D2179 /* HistoryDetailView.swift */,
 				315D11BE7EE7DDFB131AE091 /* Info.plist */,
 				CC23614C5B4DF8DD067B1DF7 /* SessionActivities.swift */,
 				E432B0AD47B5CC14F4FB1F30 /* SessionShortcuts.swift */,
@@ -401,6 +404,7 @@
 				928171449CB769D82A487AB6 /* AudioCapture.swift in Sources */,
 				0ED7C495E9EE27B10E64F5E8 /* DashboardView.swift in Sources */,
 				CD5E64069954AF97A38EAF2A /* DevelopmentFixture.swift in Sources */,
+				859AD2894942ABEB148272D7 /* HistoryDetailView.swift in Sources */,
 				500EF4EF0629E559B59617BE /* KeyboardBridge.swift in Sources */,
 				7316F42367606C01D097CA72 /* SessionActivities.swift in Sources */,
 				E195735B77001B7935A2FE03 /* SessionActivity.swift in Sources */,
