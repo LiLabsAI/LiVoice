@@ -4,6 +4,7 @@
 
 ### iOS — in development
 
+- Enabled the hosted iOS sign-in callback so email verification returns to the iOS app instead of the Android handoff page.
 - Sign out and clear local data even when the service is unavailable. Failed server revocation is reported, and a delayed sign-out response cannot clear a newer sign-in.
 - Added sign-out confirmation and kept Clear all local data available after signing out.
 - Added dictation details in History, including date and time, word count, audio duration, recognition model, processing time, and Copy/Delete actions with Undo.
