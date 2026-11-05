@@ -37,6 +37,8 @@ For a physical device select your own Apple development team for all targets, pr
 5. For a system shortcut, create one in Apple Shortcuts and add WoVoice → **Start WoVoice keyboard session**. The direct action works on the tested iOS 26.5 simulator; the automatic tile also works on iOS 27.2. Its older-runtime provider-lookup failure is isolated in [a minimal diagnostic](diagnostics/shortcut-provider/README.md).
 6. Stop the session in WoVoice, use **Open to stop** in its Dynamic Island/Lock Screen activity, or let it expire. The activity link opens WoVoice to release the microphone; a locked phone may require unlocking. Audio interruptions and force-quit end it. Expired or unavailable sessions show setup guidance.
 
+Voice and typing modes include the field's Return action (for example, Send, Search, Next or Done). The receiving app decides what that action does. A multiline editor receives a newline. Return is disabled during dictation/insertion checks and when an empty field requests it.
+
 iOS has no Android accessibility bubble. Password fields, phone pads, and apps that reject third-party keyboards use the system keyboard. The keyboard cannot identify WhatsApp/Mail or read whole conversations. Automatic context uses exposed field traits and, only with consent, bounded cursor snippets. No unsupported URL-opening or private APIs are used.
 
 ## Data boundary

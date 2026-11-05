@@ -85,11 +85,14 @@ struct FixtureEditorsView: View {
     @State private var secret = ""
     @State private var kind = 0
     @State private var webReport = "Loading web editor…"
+    @State private var returnType = UIReturnKeyType.send
+    @State private var requireText = true
+    @State private var actionReport = "Return callbacks: 0"
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
                 Text("Synthetic editor tests").font(.headline)
                 Text(DevelopmentFixture.microphoneEnabled ? "Local microphone test. Audio stays on this computer; the test service returns a fixed sentence." : "Uses invented text and audio. No microphone or production service.").font(.caption).foregroundStyle(.secondary)
-                Picker("Editor", selection: $kind) { Text("Native").tag(0); Text("Web").tag(1); Text("Password").tag(2); Text("Limited").tag(3) }.pickerStyle(.segmented)
+                Picker("Editor", selection: $kind) { Text("Native").tag(0); Text("Web").tag(1); Text("Password").tag(2); Text("Limited").tag(3); Text("Actions").tag(4) }.pickerStyle(.segmented)
                 if kind == 0 {
                     Text("Native rich text").font(.subheadline)
                     FixtureRichEditor(report: $report).frame(height: 130).overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary))
@@ -100,14 +103,60 @@ struct FixtureEditorsView: View {
                     Text(webReport).font(.caption)
                 } else if kind == 2 {
                     SecureField("Password field: system keyboard only", text: $secret).textFieldStyle(.roundedBorder)
-                } else {
+                } else if kind == 3 {
                     Text("Native field · 20-character limit").font(.subheadline)
                     FixtureLimitedEditor().frame(height: 50)
                     Text("The host rejects text exceeding its limit.").font(.caption)
+                } else {
+                    Picker("Return action", selection: $returnType) {
+                        Text("Send").tag(UIReturnKeyType.send); Text("Next").tag(UIReturnKeyType.next)
+                        Text("Search").tag(UIReturnKeyType.search); Text("Go").tag(UIReturnKeyType.go)
+                        Text("Done").tag(UIReturnKeyType.done); Text("Return").tag(UIReturnKeyType.default)
+                    }
+                    Toggle("Require text for Return", isOn: $requireText)
+                    FixtureActionEditor(returnType: returnType, requireText: requireText, report: $actionReport).frame(height: 94)
+                    Text(actionReport).font(.caption).accessibilityIdentifier("returnActionReport")
+                    Text("Synthetic fields only. Return records a delegate callback; Next moves focus. Nothing is sent.").font(.caption)
                 }
                 Spacer(minLength: 0)
         }.navigationTitle("Editor checks")
             .padding()
+    }
+}
+private struct FixtureActionEditor: UIViewRepresentable {
+    let returnType: UIReturnKeyType
+    let requireText: Bool
+    @Binding var report: String
+    func makeUIView(context: Context) -> UIStackView {
+        let first = UITextField(); first.placeholder = "Action field"; first.accessibilityLabel = "Action field"
+        first.accessibilityIdentifier = "returnActionEditor"; first.borderStyle = .roundedRect
+        first.autocorrectionType = .no; first.delegate = context.coordinator
+        let next = UITextField(); next.placeholder = "Next field"; next.accessibilityLabel = "Next field"
+        next.accessibilityIdentifier = "returnNextEditor"; next.borderStyle = .roundedRect
+        next.returnKeyType = .done; next.delegate = context.coordinator
+        context.coordinator.first = first; context.coordinator.next = next
+        let stack = UIStackView(arrangedSubviews: [first, next]); stack.axis = .vertical; stack.spacing = 8; stack.distribution = .fillEqually
+        return stack
+    }
+    func updateUIView(_ view: UIStackView, context: Context) {
+        guard let first = context.coordinator.first else { return }
+        let changed = first.returnKeyType != returnType || first.enablesReturnKeyAutomatically != requireText
+        first.returnKeyType = returnType; first.enablesReturnKeyAutomatically = requireText
+        if changed { first.reloadInputViews() }
+    }
+    func makeCoordinator() -> Coordinator { Coordinator(report: $report) }
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var report: Binding<String>
+        weak var first: UITextField?
+        weak var next: UITextField?
+        private var returns = 0
+        init(report: Binding<String>) { self.report = report }
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            returns += 1
+            report.wrappedValue = "Return callbacks: \(returns) · \(textField === first ? "Action field" : "Next field")"
+            if textField === first, textField.returnKeyType == .next { next?.becomeFirstResponder() }
+            return true
+        }
     }
 }
 private struct FixtureLimitedEditor: UIViewRepresentable {

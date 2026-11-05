@@ -4,6 +4,7 @@
 
 ### iOS — in development
 
+- Added the current field's Return action to voice mode and appropriate Send, Search, Next, Go and Done labels in both keyboard modes. Fields can disable Return while empty, and actions wait until dictation and insertion checks finish.
 - Enabled the hosted iOS sign-in callback so email verification returns to the iOS app instead of the Android handoff page.
 - Sign out and clear local data even when the service is unavailable. Failed server revocation is reported, and a delayed sign-out response cannot clear a newer sign-in.
 - Added sign-out confirmation and kept Clear all local data available after signing out.

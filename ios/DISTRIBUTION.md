@@ -19,7 +19,7 @@ The committed simulator configuration uses ad-hoc signing and supports Keychain,
 
 For a device archive, configure the owner's team and matching profiles in Xcode, choose a generic iOS device, then use Product → Archive. Review signing and privacy in Organizer before uploading. This development work has not created an App Store Connect record, accepted agreements, provisioned distribution profiles or uploaded a build. App Store distribution remains deferred. The user separately approved the production sign-in callback fix on November 5, 2026.
 
-The production server now includes the fixed `platform=ios` authentication callback in Worker version `e575dd0e-1462-4ee3-918b-c0581060eec6`. Both production URLs serve the tested script. Complete live sign-in with a fresh code before distribution; the previously failed browser session still contains the old Android handoff. This server update is separate from client distribution and did not publish an AI model or prompt revision.
+The production server now includes the fixed `platform=ios` authentication callback in Worker version `e575dd0e-1462-4ee3-918b-c0581060eec6`. Both production URLs serve the tested script. The user completed a fresh live sign-in, and authenticated account Settings were observed on the iPhone 17 Pro / iOS 26.5 simulator. This server update is separate from client distribution and did not publish an AI model or prompt revision.
 
 ## Data declarations
 

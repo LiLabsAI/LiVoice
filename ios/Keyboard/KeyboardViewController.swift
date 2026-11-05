@@ -23,6 +23,9 @@ final class KeyboardViewController: UIInputViewController {
     private let voicePanel = UIStackView()
     private let voiceHint = UILabel()
     private let nextKeyboard = UIButton(type: .system)
+    private let voiceReturn = UIButton(type: .system)
+    private let voiceActions = UIStackView()
+    private var typingReturn: UIButton?
     private var showTyping = false
     private let cancel = UIButton(type: .system)
     private let waveform = KeyboardWaveformView()
@@ -86,7 +89,12 @@ final class KeyboardViewController: UIInputViewController {
         nextKeyboard.accessibilityLabel = "Next keyboard"
         nextKeyboard.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
         nextKeyboard.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
-        voicePanel.addArrangedSubview(voiceButton); voicePanel.addArrangedSubview(voiceHint); voicePanel.addArrangedSubview(nextKeyboard)
+        voiceReturn.addAction(UIAction { [weak self] _ in self?.key("return") }, for: .touchUpInside)
+        voiceReturn.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        voiceReturn.accessibilityIdentifier = "voiceModeReturn"
+        voiceActions.addArrangedSubview(nextKeyboard); voiceActions.addArrangedSubview(voiceReturn)
+        voiceActions.spacing = 24; voiceActions.alignment = .center
+        voicePanel.addArrangedSubview(voiceButton); voicePanel.addArrangedSubview(voiceHint); voicePanel.addArrangedSubview(voiceActions)
         root.addArrangedSubview(voicePanel)
         keys.axis = .vertical; keys.spacing = 6; keys.distribution = .fillEqually
         root.addArrangedSubview(keys)
@@ -103,7 +111,10 @@ final class KeyboardViewController: UIInputViewController {
         statusLabel.numberOfLines = large ? 4 : 2
         modeButton.titleLabel?.font = .preferredFont(forTextStyle: large ? .caption1 : .subheadline)
         nextKeyboard.titleLabel?.font = .preferredFont(forTextStyle: .callout)
+        voiceReturn.titleLabel?.font = .preferredFont(forTextStyle: .callout)
         nextKeyboard.setTitle(large ? "Next" : "Next keyboard", for: .normal)
+        voiceActions.axis = large ? .vertical : .horizontal
+        voiceActions.spacing = large ? 0 : 24
         // The control's accessibility hint retains this guidance when space is
         // needed for large text and the editor above the keyboard.
         voiceHint.isHidden = large
@@ -125,9 +136,10 @@ final class KeyboardViewController: UIInputViewController {
         super.textDidChange(textInput)
         checkTarget()
         learnCorrection()
+        renderReturnKeys()
     }
     override func selectionDidChange(_ textInput: (any UITextInput)?) {
-        super.selectionDidChange(textInput); checkTarget()
+        super.selectionDidChange(textInput); checkTarget(); renderReturnKeys()
     }
     private var documentIdentifier: UUID? {
         guard let object = textDocumentProxy as? NSObject else { return nil }
@@ -199,6 +211,7 @@ final class KeyboardViewController: UIInputViewController {
         keys.isHidden = !showTyping; voicePanel.isHidden = showTyping; microphone.isHidden = !showTyping
         modeButton.setTitle(showTyping ? "Voice" : "ABC", for: .normal)
         modeButton.accessibilityLabel = showTyping ? "Show dictation controls" : "Show typing keyboard"
+        renderReturnKeys()
         cancel.isHidden = request == nil
         waveform.isHidden = phase != "recording" || !status.waveform || large
         waveform.update(level: status.level, animated: status.animate && !UIAccessibility.isReduceMotionEnabled)
@@ -275,13 +288,41 @@ final class KeyboardViewController: UIInputViewController {
         abandon(); localMessage = nil; showTyping.toggle(); renderStatus(); feedback()
     }
     private func feedback() { if status.haptics { UIImpactFeedbackGenerator(style: .light).impactOccurred() } }
+    private var returnTitle: String {
+        switch textDocumentProxy.returnKeyType ?? .default {
+        case .go: "Go"
+        case .next: "Next"
+        case .search, .google, .yahoo: "Search"
+        case .send: "Send"
+        case .done: "Done"
+        case .join: "Join"
+        case .route: "Route"
+        case .emergencyCall: "Emergency call"
+        case .continue: "Continue"
+        default: "Return"
+        }
+    }
+    private var canInsertReturn: Bool {
+        request == nil && insertion == nil && (textDocumentProxy.enablesReturnKeyAutomatically != true || textDocumentProxy.hasText)
+    }
+    private func renderReturnKeys() {
+        let title = returnTitle
+        for button in [typingReturn, voiceReturn].compactMap({ $0 }) {
+            button.setTitle(title, for: .normal)
+            button.accessibilityLabel = title
+            button.isEnabled = canInsertReturn
+            button.alpha = button.isEnabled ? 1 : 0.4
+        }
+    }
     private func renderKeys() {
+        typingReturn = nil
         for view in keys.arrangedSubviews { keys.removeArrangedSubview(view); view.removeFromSuperview() }
         let rows: [[String]] = layout == 0 ? [Array("qwertyuiop").map(String.init), Array("asdfghjkl").map(String.init), ["shift"] + Array("zxcvbnm").map(String.init) + ["delete"]]
             : layout == 1 ? [Array("1234567890").map(String.init), ["-","/",":",";","(",")","₹","&","@","\""], ["#+=",".",",","?","!","'","delete"]]
             : [["[","]","{","}","#","%","^","*","+","="], ["_","\\","|","~","<",">","€","£","$","•"], ["123",".",",","?","!","'","delete"]]
         for values in rows { addRow(values) }
         addRow([layout == 0 ? "123" : "ABC", "globe", "space", "return"])
+        renderReturnKeys()
     }
     private func addRow(_ values: [String]) {
         let row = UIStackView(); row.axis = .horizontal; row.spacing = 5; row.distribution = .fillEqually
@@ -301,7 +342,9 @@ final class KeyboardViewController: UIInputViewController {
                 button.setImage(UIImage(systemName: "delete.left"), for: .normal); button.accessibilityLabel = "Delete"
                 let hold = UILongPressGestureRecognizer(target: self, action: #selector(holdDelete(_:))); hold.minimumPressDuration = 0.35; button.addGestureRecognizer(hold)
             case "space": button.setTitle("space", for: .normal); button.accessibilityLabel = "Space"
-            case "return": button.setTitle(textDocumentProxy.returnKeyType == .search ? "search" : "return", for: .normal)
+            case "return":
+                typingReturn = button; button.accessibilityIdentifier = "typingReturn"
+                button.titleLabel?.adjustsFontSizeToFitWidth = true; button.titleLabel?.minimumScaleFactor = 0.7
             case "123", "#+=", "ABC":
                 button.setTitle(value, for: .normal)
                 button.accessibilityLabel = value == "123" ? "Show numbers and punctuation" : value == "#+=" ? "Show more symbols" : "Show letters"
@@ -314,6 +357,7 @@ final class KeyboardViewController: UIInputViewController {
         keys.addArrangedSubview(row)
     }
     private func key(_ value: String) {
+        guard value != "return" || canInsertReturn else { return }
         abandon(); localMessage = nil
         switch value {
         case "shift":
@@ -325,6 +369,8 @@ final class KeyboardViewController: UIInputViewController {
         case "#+=": layout = 2; renderKeys()
         case "ABC": layout = 0; renderKeys()
         case "space": textDocumentProxy.insertText(" ")
+        // UIKit forwards Return to a text field's delegate or inserts a newline
+        // in a text view. The host owns submission and focus changes.
         case "return": textDocumentProxy.insertText("\n"); if !caps { shift = true; renderKeys() }
         default: textDocumentProxy.insertText(shift && layout == 0 ? value.uppercased() : value); if shift && !caps { shift = false; renderKeys() }
         }
