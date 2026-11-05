@@ -4,6 +4,8 @@
 
 ### iOS — in development
 
+- Sign out and clear local data even when the service is unavailable. Failed server revocation is reported, and a delayed sign-out response cannot clear a newer sign-in.
+- Added sign-out confirmation and kept Clear all local data available after signing out.
 - Added dictation details in History, including date and time, word count, audio duration, recognition model, processing time, and Copy/Delete actions with Undo.
 - Fixed clipped History export sharing on iPad. Export now uses a complete system share sheet and keeps its text stable while sharing.
 - Prevented repeated Retry commands from starting duplicate uploads while a dictation request is already processing.

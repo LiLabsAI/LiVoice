@@ -229,6 +229,7 @@ struct SettingsView: View {
     @State private var historyOff = false
     @State private var resetAnalytics = false
     @State private var clearLocal = false
+    @State private var signingOut = false
     @State private var export: HistoryExport?
     var body: some View {
         Form {
@@ -237,7 +238,7 @@ struct SettingsView: View {
                     LabeledContent("Email", value: user.email)
                     NavigationLink("Signed-in devices") { SessionsView(model: model) }
                     if let profile = model.profile, profile.user.accountStatus.state != "active" { Text(profile.user.accountStatus.publicMessage ?? "Account restricted").foregroundStyle(.red) }
-                    Button("Sign out") { Task { await model.logout() } }.disabled(model.busy)
+                    Button("Sign out") { signingOut = true }.disabled(model.busy)
                 } else { Button("Sign in") { Task { await model.signIn() } }.disabled(model.busy) }
             }
             if model.owner != nil {
@@ -270,9 +271,11 @@ struct SettingsView: View {
                     Button("Export history", systemImage: "square.and.arrow.up") { export = HistoryExport(text: historyExport) }
                         .disabled(model.history.isEmpty)
                     Button("Reset analytics", role: .destructive) { resetAnalytics = true }
-                    Button("Clear all local data", role: .destructive) { clearLocal = true }
                     Button("Delete account", role: .destructive) { deleting = true }.disabled(model.busy)
                 }
+            }
+            Section("Local data") {
+                Button("Clear all local data", role: .destructive) { clearLocal = true }.disabled(model.busy)
             }
             Section("About") {
                 Link("Privacy policy", destination: URL(string: "https://wovoice.aliahad.com/privacy")!)
@@ -290,6 +293,7 @@ struct SettingsView: View {
             } message: { Text("For each dictation, WoVoice may send up to 512 characters before and 128 after your cursor to improve grammar and tone. This text is temporary and is never saved in History or cloud sync. You can turn it off at any time.") }
             .confirmationDialog("Turn off history sync?", isPresented: $historyOff, titleVisibility: .visible) { Button("Delete cloud history and turn off", role: .destructive) { Task { await model.updateCloud(history: false, retention: model.cloudSettings.historyRetentionDays) } } } message: { Text("Cloud history will be deleted. Your local copies remain.") }
             .confirmationDialog("Delete your WoVoice account?", isPresented: $deleting, titleVisibility: .visible) { Button("Verify email and delete", role: .destructive) { Task { await model.deleteAccount() } } } message: { Text("This permanently deletes your account and its cloud data. You will verify your email again first.") }
+            .confirmationDialog("Sign out of WoVoice?", isPresented: $signingOut, titleVisibility: .visible) { Button("Sign out", role: .destructive) { Task { await model.logout() } } } message: { Text("Voice input and sync will stop. Your local history and vocabulary remain on this device.") }
             .confirmationDialog("Reset analytics on all synced devices?", isPresented: $resetAnalytics, titleVisibility: .visible) { Button("Reset analytics", role: .destructive) { model.clear(.analytics) } }
             .confirmationDialog("Clear all local data and sign out?", isPresented: $clearLocal, titleVisibility: .visible) { Button("Clear local data", role: .destructive) { Task { await model.clearLocalData() } } } message: { Text("Removes this device’s history, vocabulary, analytics, settings, and secure sign-in. Your cloud data remains.") }
     }

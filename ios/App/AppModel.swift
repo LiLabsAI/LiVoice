@@ -132,11 +132,15 @@ import WoVoiceCore
         catch { message = error.localizedDescription; if owner == nil { stopSession(); try? reload() } }
     }
     func logout() async {
-        stopSession(); busy = true; defer { busy = false }
+        guard !busy else { return }
+        stopSession(); message = nil; busy = true; defer { busy = false }
         do {
-            try await account.call { try await account.api.empty("/v1/auth/logout", method: "POST", token: $0, body: [:]) }
-            try account.clear(); profile = nil; lastText = ""; try reload()
-        } catch { message = error.localizedDescription }
+            let revoked = try await account.signOut()
+            guard owner == nil else { throw CancellationError() }
+            try reload()
+            if !revoked { message = "Signed out on this device, but the server session could not be revoked. Revoke it from another signed-in device, or let it expire." }
+        } catch is CancellationError { }
+        catch { message = error.localizedDescription }
     }
     func deleteAccount() async {
         stopSession(); busy = true; defer { busy = false }
@@ -164,11 +168,15 @@ import WoVoiceCore
         } catch { message = error.localizedDescription }
     }
     func clearLocalData() async {
-        stopSession()
+        guard !busy else { return }
+        stopSession(); message = nil; busy = true; defer { busy = false }
         do {
-            if owner != nil { try await account.call { try await account.api.empty("/v1/auth/logout", method: "POST", token: $0, body: [:]) } }
-            try account.clear(); try store.removeAllAccounts(); profile = nil; lastText = ""; try reload()
-        } catch { message = error.localizedDescription }
+            let revoked = try await account.signOut()
+            guard owner == nil else { throw CancellationError() }
+            try store.removeAllAccounts(); try reload()
+            if !revoked { message = "Local data was cleared, but the server session could not be revoked. Revoke it from another signed-in device, or let it expire." }
+        } catch is CancellationError { }
+        catch { message = error.localizedDescription }
     }
     func sync() async {
         guard owner != nil, !syncing else { return }; syncing = true; defer { syncing = false }

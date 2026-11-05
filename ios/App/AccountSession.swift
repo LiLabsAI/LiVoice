@@ -61,6 +61,27 @@ struct KeychainSessionStore: SessionPersistence {
         generation = UUID(); refreshTask?.cancel(); refreshTask = nil; stored = nil
         onCleared?()
     }
+    /// False means local sign-out succeeded but server revocation was not confirmed.
+    func signOut() async throws -> Bool {
+        guard stored != nil else { try clear(); return true }
+        let expected = generation
+        var revoked = false
+        do {
+            try await call { try await api.empty("/v1/auth/logout", method: "POST", token: $0, body: [:]) }
+            revoked = true
+        } catch {
+            // Revocation is best effort; a network failure must not retain the
+            // local credential after the user has chosen to sign out.
+        }
+        guard generation == expected else {
+            // An auth rejection can already have cleared this session. A newer
+            // sign-in, including for the same account, must remain untouched.
+            guard stored == nil else { throw CancellationError() }
+            return true
+        }
+        try clear()
+        return revoked
+    }
     func token(force: Bool = false) async throws -> String {
         guard let current = stored else { throw APIError(code: "AUTH_REQUIRED", message: "Sign in to dictate.") }
         if !force && current.accessExpiresAt.timeIntervalSinceNow > 30 { return current.tokens.accessToken }

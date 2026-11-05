@@ -7,17 +7,20 @@ import WoVoiceCore
 
 private final class MemorySessionStore: SessionPersistence {
     var value: StoredSession?
+    var removalError: APIError?
     func load() throws -> StoredSession? { value }
     func save(_ value: StoredSession) throws { self.value = value }
-    func remove() throws { value = nil }
+    func remove() throws { if let removalError { throw removalError }; value = nil }
 }
 private nonisolated final class TestRouter: @unchecked Sendable {
     private let lock = NSLock()
     private var handler: @Sendable (URLRequest, Int) -> (Int, Data) = { _,_ in (500,Data()) }
     private var requests: [URLRequest] = []
-    func configure(_ value: @escaping @Sendable (URLRequest, Int) -> (Int,Data)) { lock.lock(); defer { lock.unlock() }; handler = value; requests = [] }
-    func respond(_ request: URLRequest) -> (Int,Data) {
-        lock.lock(); defer { lock.unlock() }
+    private var failure: URLError.Code?
+    func configure(failure: URLError.Code? = nil, _ value: @escaping @Sendable (URLRequest, Int) -> (Int,Data)) {
+        lock.lock(); defer { lock.unlock() }; handler = value; requests = []; self.failure = failure
+    }
+    func respond(_ request: URLRequest) -> (Int,Data,URLError.Code?) {
         var copy = request
         if copy.httpBody == nil, let stream = request.httpBodyStream {
             stream.open(); defer { stream.close() }
@@ -25,7 +28,12 @@ private nonisolated final class TestRouter: @unchecked Sendable {
             while stream.hasBytesAvailable { let count = stream.read(&buffer, maxLength: buffer.count); if count <= 0 { break }; data.append(contentsOf: buffer.prefix(count)) }
             copy.httpBody = data
         }
-        requests.append(copy); return handler(copy, requests.count)
+        lock.lock()
+        requests.append(copy)
+        let current = handler; let count = requests.count; let networkFailure = failure
+        lock.unlock()
+        let (status, data) = current(copy, count)
+        return (status, data, networkFailure)
     }
     func captured() -> [URLRequest] { lock.lock(); defer { lock.unlock() }; return requests }
 }
@@ -34,7 +42,11 @@ private nonisolated final class FixtureProtocol: URLProtocol, @unchecked Sendabl
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "fixture.invalid" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        let (status, data) = Self.router.respond(request)
+        let (status, data, failure) = Self.router.respond(request)
+        if let failure {
+            client?.urlProtocol(self, didFailWithError: URLError(failure))
+            return
+        }
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data)
         client?.urlProtocolDidFinishLoading(self)
@@ -349,6 +361,126 @@ private final class RetryCapture: CaptureEngine {
         try model.account.clear()
         #expect(model.owner == nil && model.dictionary.isEmpty && model.history.isEmpty && model.analytics.isEmpty)
         #expect(model.lastText.isEmpty && model.status.result == nil)
+    }
+    @Test func signOutClearsLocalCredentialsEvenWhenRevocationFails() async throws {
+        for status in [503, 401] {
+            FixtureProtocol.router.configure { _,_ in
+                (status, Data((status == 401
+                    ? #"{"error":{"code":"AUTH_REQUIRED","message":"Sign in again.","retryable":false}}"#
+                    : #"{"error":{"code":"TEMPORARY","message":"Unavailable.","retryable":true}}"#).utf8))
+            }
+            let persistence = MemorySessionStore(); let capture = RetryCapture()
+            let model = try AppModel(api: api(), persistence: persistence, capture: capture, databaseURL: URL(fileURLWithPath: ":memory:"))
+            defer { model.stopSession() }
+            try model.account.accept(tokens())
+            try model.store.save(owner: "alice", record: .init(id: "local", type: .dictionary, payload: RecordPayload.dictionary("Rahman")))
+            try model.reload()
+            await model.startSession(keyboard: false); model.toggleRecording()
+            #expect(model.recording && model.microphoneActive)
+            await model.logout()
+            #expect(model.owner == nil && persistence.value == nil)
+            #expect(!model.microphoneActive && !model.recording && !model.busy)
+            #expect(model.history.isEmpty && model.dictionary.isEmpty && model.lastText.isEmpty)
+            #expect(try model.store.records(owner: "alice", type: .dictionary).count == 1)
+            #expect(status == 503 ? model.message?.contains("server session") == true : model.message == nil)
+        }
+    }
+    @Test func clearingLocalDataWorksOfflineAndAfterSignOut() async throws {
+        FixtureProtocol.router.configure(failure: .notConnectedToInternet) { _,_ in (200, Data()) }
+        let persistence = MemorySessionStore()
+        let model = try AppModel(api: api(), persistence: persistence, capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"))
+        defer { model.stopSession() }
+        try model.account.accept(tokens())
+        for owner in ["alice", "bob"] {
+            for type in RecordType.allCases {
+                let payload: Payload
+                switch type {
+                case .dictionary: payload = RecordPayload.dictionary("Rahman")
+                case .history: payload = ["createdAtMs": .number(1), "text": .string("Synthetic record")]
+                case .analytics: payload = ["createdAtMs": .number(1)]
+                }
+                try model.store.save(owner: owner, record: .init(id: type.rawValue, type: type, payload: payload))
+            }
+            try model.store.setMetadata("haptics", owner: owner, value: false)
+        }
+        try model.reload()
+        await model.clearLocalData()
+        #expect(model.owner == nil && persistence.value == nil && !model.busy)
+        for owner in ["alice", "bob"] {
+            for type in RecordType.allCases { #expect(try model.store.records(owner: owner, type: type).isEmpty) }
+            #expect(try model.store.pending(owner: owner, historyEnabled: true).isEmpty)
+            #expect(try model.store.metadata("haptics", owner: owner, default: true))
+        }
+        #expect(model.message?.contains("server session") == true)
+        let requests = FixtureProtocol.router.captured().count
+        try model.store.save(owner: "bob", record: .init(id: "signed-out-local", type: .dictionary, payload: RecordPayload.dictionary("Retained data")))
+        await model.clearLocalData()
+        #expect(try model.store.records(owner: "bob", type: .dictionary).isEmpty)
+        #expect(FixtureProtocol.router.captured().count == requests)
+    }
+    @Test func delayedSignOutCannotClearANewerSessionForTheSameAccount() async throws {
+        for clearData in [false, true] {
+            let release = DispatchSemaphore(value: 0)
+            defer { release.signal() }
+            FixtureProtocol.router.configure { _,_ in
+                _ = release.wait(timeout: .now() + 2)
+                return (200, Data())
+            }
+            let persistence = MemorySessionStore()
+            let model = try AppModel(api: api(), persistence: persistence, capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"))
+            defer { model.stopSession() }
+            try model.account.accept(tokens())
+            try model.store.save(owner: "alice", record: .init(id: "local", type: .dictionary, payload: RecordPayload.dictionary("Keep this")))
+            try model.reload()
+            let action = Task { if clearData { await model.clearLocalData() } else { await model.logout() } }
+            defer { action.cancel() }
+            for _ in 0..<100 where FixtureProtocol.router.captured().isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+            try #require(FixtureProtocol.router.captured().first?.url?.path == "/v1/auth/logout")
+            try model.account.accept(tokens("replacement")); try model.reload()
+            release.signal()
+            await action.value
+            #expect(model.owner == "alice" && persistence.value?.tokens.accessToken == "replacement")
+            #expect(try model.store.records(owner: "alice", type: .dictionary).count == 1)
+            #expect(model.message == nil && !model.busy)
+        }
+    }
+    @Test func secureStorageFailureKeepsLocalDataAndReportsTheFailure() async throws {
+        for clearData in [false, true] {
+            FixtureProtocol.router.configure { _,_ in (200, Data()) }
+            let persistence = MemorySessionStore()
+            let model = try AppModel(api: api(), persistence: persistence, capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"))
+            defer { model.stopSession() }
+            try model.account.accept(tokens())
+            try model.store.save(owner: "alice", record: .init(id: "local", type: .dictionary, payload: RecordPayload.dictionary("Keep this")))
+            try model.reload()
+            persistence.removalError = APIError(code: "KEYCHAIN_UNAVAILABLE", message: "Secure storage is locked.")
+            if clearData { await model.clearLocalData() } else { await model.logout() }
+            #expect(model.owner == "alice" && persistence.value != nil)
+            #expect(try model.store.records(owner: "alice", type: .dictionary).count == 1)
+            #expect(model.message == "Secure storage is locked." && !model.busy)
+        }
+    }
+    @Test func signInDuringSessionClearingPreventsStaleCleanup() async throws {
+        for clearData in [false, true] {
+            FixtureProtocol.router.configure { _,_ in (503, Data()) }
+            let persistence = MemorySessionStore()
+            let model = try AppModel(api: api(), persistence: persistence, capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"))
+            try model.account.accept(tokens())
+            try model.store.save(owner: "alice", record: .init(id: "local", type: .dictionary, payload: RecordPayload.dictionary("Keep this")))
+            try model.reload()
+            let previous = model.account.onCleared
+            defer { model.account.onCleared = previous; model.stopSession() }
+            let replacement = try tokens("replacement")
+            model.account.onCleared = {
+                previous?()
+                do { try model.account.accept(replacement); try model.reload() }
+                catch { Issue.record(error) }
+            }
+            if clearData { await model.clearLocalData() } else { await model.logout() }
+            #expect(model.owner == "alice" && persistence.value?.tokens.accessToken == "replacement")
+            #expect(try model.store.records(owner: "alice", type: .dictionary).count == 1)
+            #expect(model.message == nil && !model.busy)
+        }
     }
     @Test func nativeAudioConverts48kTo16kAndDiscardsCancelledCapture() throws {
         let format = try #require(AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false))
