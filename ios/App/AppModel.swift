@@ -114,11 +114,12 @@ import WoVoiceCore
             history = []; dictionary = []; analytics = []; preferences = .init(); cloudSettings = .init()
             lastSyncedAt = nil; syncWarning = nil; return
         }
+        cloudSettings = try store.metadata("cloudSettings", owner: owner, default: CloudSettings())
+        try store.applyRetention(owner: owner, days: cloudSettings.historyRetentionDays)
         history = try store.records(owner: owner, type: .history).sorted { ($0.payload?["createdAtMs"]?.number ?? 0) > ($1.payload?["createdAtMs"]?.number ?? 0) }
         dictionary = try store.records(owner: owner, type: .dictionary).sorted { ($0.payload?["term"]?.string ?? "") < ($1.payload?["term"]?.string ?? "") }
         analytics = try store.records(owner: owner, type: .analytics)
         preferences = try store.metadata("context", owner: owner, default: ContextPreferences())
-        cloudSettings = try store.metadata("cloudSettings", owner: owner, default: CloudSettings())
         lastSyncedAt = try store.metadata("lastSync", owner: owner, default: nil as Date?)
         let warning = try store.metadata("syncWarning", owner: owner, default: "")
         syncWarning = warning.isEmpty ? nil : warning

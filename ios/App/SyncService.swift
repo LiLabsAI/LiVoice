@@ -27,6 +27,8 @@ final class SyncService {
                 for record in page.items where record.type != .history || settings.historySyncEnabled || record.deleted {
                     try store.merge(owner: owner, remote: record)
                 }
+                // A feed can still contain expired history before server cleanup.
+                try store.applyRetention(owner: owner, days: settings.historyRetentionDays)
                 try store.setMetadata("cursor", owner: owner, value: page.nextCursor)
             }
             if !page.hasMore { break }

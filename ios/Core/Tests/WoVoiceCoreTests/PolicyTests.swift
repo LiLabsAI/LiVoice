@@ -2,6 +2,28 @@ import Foundation
 import Testing
 @testable import WoVoiceCore
 
+@Test @MainActor func historyRetentionPreservesTheCutoffAndOtherAccounts() throws {
+    let store = try RecordStore(url: URL(fileURLWithPath: ":memory:"))
+    let now = Date(timeIntervalSince1970: 1_790_000_000)
+    let cutoff = now.addingTimeInterval(-30 * 86400).timeIntervalSince1970 * 1000
+    for (id, timestamp) in [("expired", cutoff - 1), ("boundary", cutoff), ("recent", cutoff + 1)] {
+        try store.save(owner: "alice", record: .init(id: id, type: .history, version: 3, payload: ["text": .string(id), "createdAtMs": .number(timestamp)]), dirty: false)
+    }
+    try store.save(owner: "bob", record: .init(id: "other-account", type: .history, payload: ["text": .string("Keep"), "createdAtMs": .number(cutoff - 1)]), dirty: false)
+    try store.save(owner: "alice", record: .init(id: "usage", type: .analytics, payload: ["createdAtMs": .number(cutoff - 1)]), dirty: false)
+    try store.save(owner: "alice", record: .init(id: "user-deleted", type: .history, version: 3, deleted: true, payload: nil))
+    try store.applyRetention(owner: "alice", days: nil, now: now)
+    #expect(try store.records(owner: "alice", type: .history).count == 3)
+    try store.applyRetention(owner: "alice", days: 30, now: now)
+    #expect(try store.records(owner: "alice", type: .history).map(\.id).sorted() == ["boundary", "recent"])
+    #expect(try store.records(owner: "bob", type: .history).count == 1)
+    #expect(try store.records(owner: "alice", type: .analytics).count == 1)
+    #expect(try store.record(owner: "alice", type: .history, id: "expired") == nil)
+    let tombstone = try #require(store.pending(owner: "alice", historyEnabled: true).first?.record)
+    #expect(tombstone.id == "user-deleted" && tombstone.version == 3 && tombstone.deleted && tombstone.payload == nil)
+    #expect(try store.pending(owner: "alice", historyEnabled: true).count == 1)
+}
+
 @Test func syncPayloadsMatchTheWorkerContract() throws {
     let result = try JSONDecoder().decode(Transcription.self, from: Data(#"{"text":"Meet Professor Rahman at 10:30 tomorrow.","rawText":"meet professor rahman at ten thirty tomorrow","polished":true,"asrModel":"fixture-whisper","requestId":"ios-dictation-contract","timingsMs":{"asr":120,"polish":80,"total":200},"usage":{"asrNeurons":2,"polishNeurons":3,"totalNeurons":5,"estimatedCostUsd":0.0001}}"#.utf8))
     let now = Date(timeIntervalSince1970: 1_790_000_000.125)

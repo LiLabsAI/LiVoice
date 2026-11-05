@@ -920,4 +920,42 @@ private final class FixtureAuthentication: AccountAuthenticating {
         release.signal(); release.signal(); await first.value; await second.value
         #expect(!model.busy && model.owner == "alice")
     }
+    @Test func cachedHistoryRetentionIsAppliedOfflineBeforeHistoryIsDisplayed() throws {
+        for syncEnabled in [false, true] {
+            let model = try AppModel(api: api(), persistence: MemorySessionStore(), capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"))
+            try model.account.accept(tokens())
+            try model.store.setMetadata("cloudSettings", owner: "alice", value: CloudSettings(historySyncEnabled: syncEnabled, historyRetentionDays: 30))
+            let old = Date.now.addingTimeInterval(-45 * 86400).timeIntervalSince1970 * 1000
+            let recent = Date.now.timeIntervalSince1970 * 1000
+            try model.store.save(owner: "alice", record: .init(id: "expired", type: .history, payload: ["text": .string("Expired private text"), "createdAtMs": .number(old)]))
+            try model.store.save(owner: "alice", record: .init(id: "recent", type: .history, payload: ["text": .string("Recent text"), "createdAtMs": .number(recent)]))
+            try model.store.save(owner: "alice", record: .init(id: "usage", type: .analytics, payload: ["createdAtMs": .number(old)]))
+            try model.store.save(owner: "bob", record: .init(id: "other-owner", type: .history, payload: ["text": .string("Keep this"), "createdAtMs": .number(old)]))
+            FixtureProtocol.router.configure { _,_ in (503,Data()) }
+            try model.reload()
+            #expect(model.history.map(\.id) == ["recent"])
+            #expect(model.analytics.count == 1 && !model.microphoneActive)
+            #expect(try model.store.records(owner: "bob", type: .history).count == 1)
+            #expect(FixtureProtocol.router.captured().isEmpty)
+        }
+    }
+    @Test func retentionPrunesAnExpiredIncomingRecordWithoutUploadingIt() async throws {
+        let old = Date.now.addingTimeInterval(-45 * 86400).timeIntervalSince1970 * 1000
+        let recent = Date.now.timeIntervalSince1970 * 1000
+        let page = Data("""
+        {"nextCursor":2,"hasMore":false,"settings":{"historySyncEnabled":true,"historyRetentionDays":30,"legacyVault":false},"items":[
+          {"id":"expired-remote","type":"history","version":1,"deleted":false,"payload":{"text":"Expired private text","createdAtMs":\(old)}},
+          {"id":"recent-remote","type":"history","version":1,"deleted":false,"payload":{"text":"Recent text","createdAtMs":\(recent)}}]}
+        """.utf8)
+        FixtureProtocol.router.configure { request,_ in
+            if request.httpMethod == "GET" { return (200,page) }
+            return (200,Data(#"{"applied":[{"id":"expired-remote","type":"history","version":2}]}"#.utf8))
+        }
+        let model = try AppModel(api: api(), persistence: MemorySessionStore(), capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"))
+        try model.account.accept(tokens()); try model.reload(); await model.sync()
+        #expect(model.history.map(\.id) == ["recent-remote"])
+        let uploads = FixtureProtocol.router.captured().filter { $0.httpMethod == "POST" }
+        #expect(uploads.isEmpty)
+        #expect(try model.store.pending(owner: "alice", historyEnabled: true).isEmpty)
+    }
 }

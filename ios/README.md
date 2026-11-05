@@ -49,6 +49,8 @@ Settings → Cloud sync shows the last sync time and any cloud limit or remainin
 
 Returning to the app automatically refreshes account status, quota and synced records. This does not start recording. Explicit keyboard-session shortcuts retain their separate user-started microphone workflow.
 
+Auto-delete history also applies to device copies using the last saved retention choice when offline. It removes expired local text while retaining analytics and other accounts' records. Cloud expiry follows the account's current server policy; an older offline choice does not queue cloud deletions.
+
 Deleting an account requires fresh email verification for the current session. Cancelling keeps the account and local data. If the session changes during verification, start deletion again from the current account.
 
 For a restricted account, voice input and cloud sync stop while offline typing and local records remain available. Home explains the restriction. Use **Check account status** or **Refresh account and sync** after access is restored; the app confirms the new status with the server.

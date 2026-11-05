@@ -4,6 +4,7 @@
 
 ### iOS — in development
 
+- Apply cached history-retention choices before showing local history, including offline. Expired incoming records are removed before a sync finishes. Local expiry preserves analytics, other accounts and explicit queued deletions; the server enforces the current cloud retention policy.
 - Fixed current-device sign-out showing a sign-in error afterward. Device actions now reject stale lists after a new sign-in and ignore repeated revocation taps. Current-device sign-out stops the microphone immediately; confirmations distinguish this device from another device and explain that local records remain.
 - Refresh account status, quota and synced records automatically when returning to the app. Repeated activation shares one refresh, and returning never starts the microphone by itself.
 - Account restrictions now stop voice sessions and cloud sync, persist after service errors, and remain visible after restart. Offline typing and local data remain available. Check account status or refresh and sync to pick up restored access.

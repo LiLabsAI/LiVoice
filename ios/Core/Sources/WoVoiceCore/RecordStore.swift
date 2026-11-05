@@ -171,9 +171,15 @@ import CSQLite
         if !settings.historySyncEnabled {
             try execute("UPDATE records SET version=0,dirty=1 WHERE owner=? AND type='history'", strings: [owner])
         }
-        if let days = settings.historyRetentionDays {
-            let cutoff = Date.now.addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970 * 1000
-            for r in try records(owner: owner, type: .history) where (r.payload?["createdAtMs"]?.number ?? 0) < cutoff { try delete(owner: owner, record: r) }
+        try applyRetention(owner: owner, days: settings.historyRetentionDays)
+    }
+    public func applyRetention(owner: String, days: Int?, now: Date = .now) throws {
+        guard let days, days > 0 else { return }
+        let cutoff = now.addingTimeInterval(-Double(days) * 86400).timeIntervalSince1970 * 1000
+        for record in try records(owner: owner, type: .history) where (record.payload?["createdAtMs"]?.number ?? 0) < cutoff {
+            // The server applies the current cloud policy. A cached offline
+            // policy only expires this device's copy, not another device's data.
+            try execute("DELETE FROM records WHERE owner=? AND type='history' AND id=?", strings: [owner, record.id])
         }
     }
     public func removeAll(owner: String) throws {
