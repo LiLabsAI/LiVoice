@@ -1,0 +1,67 @@
+{
+  "items": [
+    {
+      "id": "ios-dictation-contract",
+      "type": "history",
+      "baseVersion": 0,
+      "deleted": false,
+      "payload": {
+        "schemaVersion": 1,
+        "text": "Meet Professor Rahman at 10:30 tomorrow.",
+        "createdAtMs": 1790000000125,
+        "zoneId": "UTC",
+        "offsetSeconds": 0,
+        "wordCount": 6,
+        "audioDurationMs": 1250,
+        "asrModel": "fixture-whisper",
+        "polished": true,
+        "asrMs": 120,
+        "polishMs": 80,
+        "totalMs": 200,
+        "asrNeurons": 2,
+        "polishNeurons": 3,
+        "totalNeurons": 5,
+        "estimatedCostUsd": 0.0001
+      }
+    },
+    {
+      "id": "ios-word-contract",
+      "type": "dictionary",
+      "baseVersion": 0,
+      "deleted": false,
+      "payload": {
+        "schemaVersion": 1,
+        "term": "Professor Rahman",
+        "normalizedTerm": "professor rahman",
+        "status": "confirmed",
+        "source": "manual",
+        "createdAtMs": 1790000000125,
+        "lastUsedAtMs": 0,
+        "useCount": 0
+      }
+    },
+    {
+      "id": "ios-dictation-contract",
+      "type": "analytics",
+      "baseVersion": 0,
+      "deleted": false,
+      "payload": {
+        "schemaVersion": 1,
+        "createdAtMs": 1790000000125,
+        "zoneId": "UTC",
+        "wordCount": 6,
+        "audioDurationMs": 1250,
+        "polished": true,
+        "asrMs": 120,
+        "polishMs": 80,
+        "totalMs": 200,
+        "asrNeurons": 2,
+        "polishNeurons": 3,
+        "totalNeurons": 5,
+        "estimatedCostUsd": 0.0001,
+        "processingMs": 200,
+        "corrected": false
+      }
+    }
+  ]
+}

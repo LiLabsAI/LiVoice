@@ -46,6 +46,39 @@ class SyncCoordinatorTest {
     }
 
     @Test
+    fun iosContractImportsIntoAndroidAndRemoteChangesUpdateHistoryVocabularyAndTotals() = runBlocking {
+        val fixture = checkNotNull(javaClass.getResourceAsStream("/ios-sync-v2.json"))
+            .bufferedReader().use { JSONObject(it.readText()) }.getJSONArray("items")
+        val writes = (0 until fixture.length()).map { index ->
+            val item = fixture.getJSONObject(index)
+            CloudWrite(item.getString("id"), item.getString("type"), item.getInt("baseVersion"), item.getJSONObject("payload"))
+        }
+        assertTrue(cloud.push("fixture", writes) is AccountResult.Success)
+        val phone = device()
+        assertEquals(SyncResult.Success(0, 3), phone.sync.syncNow())
+        val history = phone.repository.history().single()
+        assertEquals("Meet Professor Rahman at 10:30 tomorrow.", history.finalText)
+        assertEquals(6, history.wordCount)
+        assertEquals(1250L, history.audioDurationMs)
+        assertEquals("Professor Rahman", phone.repository.dictionary(confirmed = true).single().term)
+        val totals = phone.repository.dashboard(AnalyticsPeriod.ALL_TIME).aggregates
+        assertEquals(1L, totals.sumOf { it.dictationCount })
+        assertEquals(6L, totals.sumOf { it.wordCount })
+        assertEquals(0.0001, totals.sumOf { it.estimatedCostUsd }, 0.0000001)
+
+        val word = writes.single { it.type == "dictionary" }
+        val edited = JSONObject(checkNotNull(word.payload).toString())
+            .put("term", "Doctor Rahman").put("normalizedTerm", "doctor rahman")
+        val changes = listOf(CloudWrite(word.id, word.type, 1, edited)) + writes.filter { it.type != "dictionary" }
+            .map { CloudWrite(it.id, it.type, 1, null) }
+        assertTrue(cloud.push("fixture", changes) is AccountResult.Success)
+        assertEquals(SyncResult.Success(0, 3), phone.sync.syncNow())
+        assertTrue(phone.repository.history().isEmpty())
+        assertEquals("Doctor Rahman", phone.repository.dictionary(confirmed = true).single().term)
+        assertEquals(0L, phone.repository.dashboard(AnalyticsPeriod.ALL_TIME).aggregates.sumOf { it.dictationCount })
+    }
+
+    @Test
     fun anUploadWhoseResponseWasLostConverges() = runBlocking {
         val phone = device()
         phone.dictate("req-1", "Hello there.")

@@ -21,6 +21,10 @@ java {
     targetCompatibility = JavaVersion.VERSION_11
 }
 
+sourceSets.named("test") {
+    resources.srcDir(rootProject.file("contracts"))
+}
+
 // Export the Room schema so future migrations can be written and validated
 // against real history instead of guesswork (schema v2 shipped unexported).
 ksp {

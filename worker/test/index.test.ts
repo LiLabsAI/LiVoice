@@ -12,6 +12,7 @@ import { chooseSafePolish } from "../src/validation";
 import { validateWav } from "../src/wav";
 import { cleanupReservation, defaultAiConfiguration, type AiConfiguration } from "../src/ai-config";
 import { readActiveAiConfiguration } from "../src/ai-config-store";
+import iosSyncContract from "../../contracts/ios-sync-v2.json";
 
 declare global {
   namespace Cloudflare {
@@ -448,6 +449,38 @@ describe("cloud sync (v2)", () => {
   }
   const history = (id: string, text: string, baseVersion = 0) => ({
     id, type: "history", baseVersion, deleted: false, payload: { schemaVersion: 1, text, createdAtMs: 1_790_000_000_000 },
+  });
+
+  it("round-trips the Swift iOS sync contract, edits vocabulary, and deletes dictation records", async () => {
+    const { call } = await signedInUser("ios-contract@example.com");
+    const push = await call("/v2/sync/batch", { body: iosSyncContract });
+    expect(push.status).toBe(200);
+    expect((await push.json()) as object).toMatchObject({
+      applied: iosSyncContract.items.map(({ id, type }) => ({ id, type, version: 1 })),
+    });
+    const first = await call("/v2/sync?cursor=0");
+    expect(first.status).toBe(200);
+    const page = await first.json() as { nextCursor: number; items: Array<{ id: string; type: string; payload: unknown }> };
+    expect(page.items).toHaveLength(3);
+    expect(page.items).toEqual(expect.arrayContaining(iosSyncContract.items.map(({ id, type, payload }) => ({
+      id, type, version: 1, deleted: false, payload, modifiedAt: expect.any(Number),
+    }))));
+    const word = iosSyncContract.items.find(({ type }) => type === "dictionary")!;
+    const editedPayload = { ...word.payload, term: "Doctor Rahman", normalizedTerm: "doctor rahman" };
+    const change = await call("/v2/sync/batch", { body: { items: [
+      { ...word, baseVersion: 1, payload: editedPayload },
+      ...iosSyncContract.items.filter(({ type }) => type !== "dictionary").map(({ id, type }) => ({
+        id, type, baseVersion: 1, deleted: true, payload: null,
+      })),
+    ] } });
+    expect(change.status).toBe(200);
+    const updated = await call(`/v2/sync?cursor=${page.nextCursor}`);
+    expect(updated.status).toBe(200);
+    expect((await updated.json()) as object).toMatchObject({ items: expect.arrayContaining([
+      { id: word.id, type: "dictionary", version: 2, deleted: false, payload: editedPayload, modifiedAt: expect.any(Number) },
+      { id: "ios-dictation-contract", type: "history", version: 2, deleted: true, payload: null, modifiedAt: expect.any(Number) },
+      { id: "ios-dictation-contract", type: "analytics", version: 2, deleted: true, payload: null, modifiedAt: expect.any(Number) },
+    ]) });
   });
 
   it("stores records sealed with the account key and returns plain payloads", async () => {

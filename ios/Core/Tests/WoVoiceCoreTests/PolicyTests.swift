@@ -2,6 +2,29 @@ import Foundation
 import Testing
 @testable import WoVoiceCore
 
+@Test func syncPayloadsMatchTheWorkerContract() throws {
+    let result = try JSONDecoder().decode(Transcription.self, from: Data(#"{"text":"Meet Professor Rahman at 10:30 tomorrow.","rawText":"meet professor rahman at ten thirty tomorrow","polished":true,"asrModel":"fixture-whisper","requestId":"ios-dictation-contract","timingsMs":{"asr":120,"polish":80,"total":200},"usage":{"asrNeurons":2,"polishNeurons":3,"totalNeurons":5,"estimatedCostUsd":0.0001}}"#.utf8))
+    let now = Date(timeIntervalSince1970: 1_790_000_000.125)
+    var history = RecordPayload.history(result, durationMs: 1250, now: now)
+    #expect(history["zoneId"]?.string == TimeZone.current.identifier)
+    #expect(history["offsetSeconds"]?.number == Double(TimeZone.current.secondsFromGMT(for: now)))
+    // The shared wire example uses UTC; the client writes its actual time zone.
+    history["zoneId"] = .string("UTC"); history["offsetSeconds"] = .number(0)
+    let analytics = RecordPayload.analytics(history: history)
+    #expect(analytics["text"] == nil && analytics["rawText"] == nil && analytics["context"] == nil)
+    let records = [
+        CloudRecord(id: result.requestId, type: .history, payload: history),
+        CloudRecord(id: "ios-word-contract", type: .dictionary, payload: RecordPayload.dictionary("Professor Rahman", now: now)),
+        CloudRecord(id: result.requestId, type: .analytics, payload: analytics)
+    ]
+    let encoded = try JSONEncoder().encode(["items": records.map { CloudWrite(record: $0) }])
+    let actual = try JSONDecoder().decode(JSONValue.self, from: encoded)
+    var root = URL(fileURLWithPath: #filePath)
+    for _ in 0..<5 { root.deleteLastPathComponent() }
+    let expected = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: root.appendingPathComponent("contracts/ios-sync-v2.json")))
+    #expect(actual == expected)
+}
+
 @Test func keyboardRequestRecoversFromLostAcknowledgementAndParentCancellation() {
     let now = ContinuousClock.now; let id = UUID()
     var pending = PendingDictation()
