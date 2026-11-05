@@ -46,6 +46,8 @@ struct KeychainSessionStore: SessionPersistence {
     private let secrets: any SessionPersistence
     private var refreshTask: Task<StoredSession, any Error>?
     private var generation = UUID()
+    /// Refreshes preserve identity; accepting or clearing a session replaces it.
+    var sessionIdentity: UUID { generation }
     var onCleared: (() -> Void)?
     var user: User? { stored?.tokens.user }
     init(api: APIClient, persistence: any SessionPersistence = KeychainSessionStore()) throws {
@@ -121,7 +123,11 @@ struct KeychainSessionStore: SessionPersistence {
     }
 }
 
-final class WebAuthentication: NSObject, ASWebAuthenticationPresentationContextProviding {
+protocol AccountAuthenticating {
+    func authenticate(base: URL, deletion: Bool) async throws -> (code: String, verifier: String)
+}
+
+final class WebAuthentication: NSObject, ASWebAuthenticationPresentationContextProviding, AccountAuthenticating {
     private var session: ASWebAuthenticationSession?
     func authenticate(base: URL, deletion: Bool = false) async throws -> (code: String, verifier: String) {
         guard session == nil else { throw APIError(code: "AUTH_IN_PROGRESS", message: "A sign-in window is already open.") }

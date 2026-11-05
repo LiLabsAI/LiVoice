@@ -1,6 +1,7 @@
 import Foundation
 import AVFAudio
 import ActivityKit
+import AuthenticationServices
 import Testing
 import WoVoiceCore
 @testable import WoVoice
@@ -69,6 +70,25 @@ private final class RetryCapture: CaptureEngine {
     func finish() throws -> (wav: Data, duration: Double) { (wav, 1) }
     func cancel() {}
     func stopSession() { active = false }
+}
+
+private final class FixtureAuthentication: AccountAuthenticating {
+    typealias ResultValue = (code: String, verifier: String)
+    var calls: [(base: URL, deletion: Bool)] = []
+    var result: Result<ResultValue, any Error> = .success(("fresh-verification-code-for-tests", "fixture-verifier"))
+    var paused = false
+    private var continuation: CheckedContinuation<ResultValue, any Error>?
+    var waiting: Bool { continuation != nil }
+    func authenticate(base: URL, deletion: Bool) async throws -> ResultValue {
+        calls.append((base, deletion))
+        guard continuation == nil else { throw APIError(code: "AUTH_IN_PROGRESS", message: "A sign-in window is already open.") }
+        if paused { return try await withCheckedThrowingContinuation { continuation = $0 } }
+        return try result.get()
+    }
+    func complete(_ result: Result<ResultValue, any Error>? = nil) {
+        let pending = continuation; continuation = nil
+        pending?.resume(with: result ?? self.result)
+    }
 }
 
 @Suite(.serialized) @MainActor struct AccountAndSyncTests {
@@ -634,5 +654,88 @@ private final class RetryCapture: CaptureEngine {
         try await service.run()
         #expect(try store.pending(owner: "alice", historyEnabled: true).isEmpty)
         #expect(try store.metadata("syncWarning", owner: "alice", default: "").isEmpty)
+    }
+    @Test func accountDeletionVerifiesFreshEmailBeforeDeletingOnlyTheCurrentAccount() async throws {
+        let refreshed = try JSONEncoder().encode(tokens("rotated"))
+        FixtureProtocol.router.configure { request,_ in
+            request.url?.path == "/v1/auth/refresh" ? (200, refreshed) : (200, Data())
+        }
+        let auth = FixtureAuthentication(); let persistence = MemorySessionStore(); let capture = RetryCapture()
+        persistence.value = StoredSession(tokens: try tokens(), now: Date(timeIntervalSince1970: 0))
+        let model = try AppModel(api: api(), persistence: persistence, capture: capture, databaseURL: URL(fileURLWithPath: ":memory:"), auth: auth)
+        for type in RecordType.allCases {
+            try model.store.save(owner: "alice", record: .init(id: type.rawValue, type: type, payload: ["text": .string("Synthetic local data")]))
+        }
+        try model.store.save(owner: "bob", record: .init(id: "other", type: .dictionary, payload: RecordPayload.dictionary("Keep this")))
+        try model.store.setMetadata("context", owner: "alice", value: ContextPreferences(level: .nearby))
+        try model.reload(); try await capture.startSession()
+        await model.deleteAccount()
+        #expect(auth.calls.count == 1 && auth.calls.first?.deletion == true && auth.calls.first?.base == api().baseURL)
+        let request = try #require(FixtureProtocol.router.captured().last)
+        #expect(FixtureProtocol.router.captured().count == 2 && request.httpMethod == "DELETE" && request.url?.path == "/v1/me")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer rotated")
+        let body = try JSONDecoder().decode(Payload.self, from: #require(request.httpBody))
+        #expect(body["reauthToken"]?.string == "fresh-verification-code-for-tests")
+        #expect(model.owner == nil && persistence.value == nil && !model.busy && !model.microphoneActive)
+        for type in RecordType.allCases { #expect(try model.store.records(owner: "alice", type: type).isEmpty) }
+        #expect(try model.store.records(owner: "bob", type: .dictionary).count == 1)
+        #expect(try model.store.metadata("context", owner: "alice", default: ContextPreferences()).level == .off)
+    }
+    @Test func cancellingDeletionVerificationLeavesTheAccountAndLocalDataIntact() async throws {
+        let auth = FixtureAuthentication()
+        auth.result = .failure(ASWebAuthenticationSessionError(.canceledLogin))
+        let model = try AppModel(api: api(), persistence: MemorySessionStore(), capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"), auth: auth)
+        try model.account.accept(tokens())
+        try model.store.save(owner: "alice", record: .init(id: "word", type: .dictionary, payload: RecordPayload.dictionary("Keep this")))
+        try model.reload(); model.message = "Previous message"
+        FixtureProtocol.router.configure { _,_ in (500, Data()) }
+        await model.deleteAccount()
+        #expect(model.owner == "alice" && !model.busy && model.message == nil)
+        #expect(try model.store.records(owner: "alice", type: .dictionary).count == 1)
+        #expect(FixtureProtocol.router.captured().isEmpty)
+    }
+    @Test func repeatedDeletionDoesNotReleaseTheBusyStateOrOpenAnotherVerification() async throws {
+        let auth = FixtureAuthentication(); auth.paused = true
+        defer { auth.complete(.failure(CancellationError())) }
+        let model = try AppModel(api: api(), persistence: MemorySessionStore(), capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"), auth: auth)
+        try model.account.accept(tokens()); FixtureProtocol.router.configure { _,_ in (200, Data()) }
+        let deletion = Task { await model.deleteAccount() }
+        for _ in 0..<100 where !auth.waiting { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(auth.waiting && model.busy)
+        await model.deleteAccount()
+        #expect(auth.calls.count == 1 && model.busy && model.message == nil)
+        auth.complete(.failure(CancellationError())); await deletion.value
+        #expect(!model.busy && model.owner == "alice" && model.message == nil)
+        #expect(FixtureProtocol.router.captured().isEmpty)
+    }
+    @Test func deletionVerificationCannotBeReusedAfterAnAccountSessionChanges() async throws {
+        for replacement in ["alice", "bob"] {
+            let auth = FixtureAuthentication(); auth.paused = true
+            defer { auth.complete(.failure(CancellationError())) }
+            let persistence = MemorySessionStore()
+            let model = try AppModel(api: api(), persistence: persistence, capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"), auth: auth)
+            try model.account.accept(tokens())
+            try model.store.save(owner: "alice", record: .init(id: "word", type: .dictionary, payload: RecordPayload.dictionary("Keep this")))
+            try model.reload(); FixtureProtocol.router.configure { _,_ in (200, Data()) }
+            let deletion = Task { await model.deleteAccount() }
+            for _ in 0..<100 where !auth.waiting { try await Task.sleep(for: .milliseconds(10)) }
+            try #require(auth.waiting)
+            try model.account.accept(tokens("replacement", owner: replacement)); try model.reload()
+            auth.complete(); await deletion.value
+            #expect(model.owner == replacement && persistence.value?.tokens.accessToken == "replacement" && !model.busy)
+            #expect(try model.store.records(owner: "alice", type: .dictionary).count == 1)
+            #expect(FixtureProtocol.router.captured().isEmpty && model.message == nil)
+        }
+    }
+    @Test func rejectedAccountDeletionKeepsTheLocalPartitionAndReportsTheError() async throws {
+        FixtureProtocol.router.configure { _,_ in (403, Data(#"{"error":{"code":"REAUTH_REQUIRED","message":"Verify your email again.","retryable":false}}"#.utf8)) }
+        let auth = FixtureAuthentication(); let persistence = MemorySessionStore()
+        let model = try AppModel(api: api(), persistence: persistence, capture: RetryCapture(), databaseURL: URL(fileURLWithPath: ":memory:"), auth: auth)
+        try model.account.accept(tokens())
+        try model.store.save(owner: "alice", record: .init(id: "word", type: .dictionary, payload: RecordPayload.dictionary("Keep this")))
+        try model.reload(); await model.deleteAccount()
+        #expect(model.owner == "alice" && persistence.value != nil && !model.busy)
+        #expect(model.message == "Verify your email again.")
+        #expect(try model.store.records(owner: "alice", type: .dictionary).count == 1)
     }
 }

@@ -9,7 +9,7 @@ import WoVoiceCore
 @Observable final class AppModel {
     let account: AccountSession
     let store: RecordStore
-    private let auth = WebAuthentication()
+    private let auth: any AccountAuthenticating
     private let audio: any CaptureEngine
     private let clock: () -> ContinuousClock.Instant
     private var sessionDeadline: ContinuousClock.Instant?
@@ -58,8 +58,8 @@ import WoVoiceCore
     var microphoneActive: Bool { audio.active }
     var keyboardSessionActive: Bool { sessionKeyboard && audio.active && status.expiresAt > .now && sessionDeadline.map { clock() < $0 } == true }
 
-    init(api: APIClient = APIClient(), persistence: any SessionPersistence = KeychainSessionStore(), capture: any CaptureEngine = AudioCapture(), databaseURL: URL? = nil, clock: @escaping () -> ContinuousClock.Instant = { .now }) throws {
-        audio = capture; self.clock = clock
+    init(api: APIClient = APIClient(), persistence: any SessionPersistence = KeychainSessionStore(), capture: any CaptureEngine = AudioCapture(), databaseURL: URL? = nil, clock: @escaping () -> ContinuousClock.Instant = { .now }, auth: any AccountAuthenticating = WebAuthentication()) throws {
+        audio = capture; self.clock = clock; self.auth = auth
         let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: directory.path)
         var resources = URLResourceValues(); resources.isExcludedFromBackup = true
@@ -123,7 +123,7 @@ import WoVoiceCore
     func signIn() async {
         guard !busy else { return }; busy = true; defer { busy = false }
         do {
-            let result = try await auth.authenticate(base: account.api.baseURL)
+            let result = try await auth.authenticate(base: account.api.baseURL, deletion: false)
             let tokens = try await account.api.exchange(code: result.code, verifier: result.verifier, device: "iOS — \(UIDevice.current.model)")
             stopSession()
             try account.accept(tokens); try reload(); await refreshProfile(); await sync()
@@ -149,14 +149,18 @@ import WoVoiceCore
         catch { message = error.localizedDescription }
     }
     func deleteAccount() async {
-        stopSession(); busy = true; defer { busy = false }
+        guard !busy, let expected = owner else { return }
+        let expectedSession = account.sessionIdentity
+        stopSession(); message = nil; busy = true; defer { busy = false }
         do {
-            guard let expected = owner else { return }
             let verification = try await auth.authenticate(base: account.api.baseURL, deletion: true)
-            guard owner == expected else { throw CancellationError() }
+            guard owner == expected, account.sessionIdentity == expectedSession else { throw CancellationError() }
             try await account.call { try await account.api.empty("/v1/me", method: "DELETE", token: $0, body: ["reauthToken": .string(verification.code)]) }
+            guard account.sessionIdentity == expectedSession else { throw CancellationError() }
             try store.removeAll(owner: expected); try account.clear(); profile = nil; lastText = ""; try reload()
-        } catch { message = error.localizedDescription }
+        } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin { }
+        catch is CancellationError { }
+        catch { message = error.localizedDescription }
     }
     func loadSessions() async {
         nonisolated struct Response: Decodable, Sendable { let sessions: [DeviceSession] }

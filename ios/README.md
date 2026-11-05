@@ -43,6 +43,8 @@ Voice and typing modes include the field's Return action (for example, Send, Sea
 
 Settings → Cloud sync shows the last sync time and any cloud limit or remaining-work warning. New vocabulary that cannot fit in the cloud stays on this device; other records continue syncing. A later successful retry clears the warning. Failed requests retain the previous sync time.
 
+Deleting an account requires fresh email verification for the current session. Cancelling keeps the account and local data. If the session changes during verification, start deletion again from the current account.
+
 iOS has no Android accessibility bubble. Password fields, phone pads, and apps that reject third-party keyboards use the system keyboard. The keyboard cannot identify WhatsApp/Mail or read whole conversations. Automatic context uses exposed field traits and, only with consent, bounded cursor snippets. No unsupported URL-opening or private APIs are used.
 
 ## Data boundary
