@@ -30,23 +30,23 @@ public enum JSONValue: Codable, Sendable, Equatable {
 public typealias Payload = [String: JSONValue]
 
 public struct AccountStatus: Codable, Sendable {
-    public let state: String
-    public let suspendedUntil: Double?
-    public let publicMessage: String?
+    public var state: String
+    public var suspendedUntil: Double?
+    public var publicMessage: String?
     public let supportEmail: String
 }
 public struct User: Codable, Sendable, Identifiable {
     public let id: String
     public let email: String
     public let role: String
-    public let accountStatus: AccountStatus
+    public var accountStatus: AccountStatus
 }
 public struct Tokens: Codable, Sendable {
     public let accessToken: String
     public let refreshToken: String
     public let accessExpiresIn: Double
     public let refreshExpiresIn: Double
-    public let user: User
+    public var user: User
 }
 public struct StoredSession: Codable, Sendable {
     public var tokens: Tokens

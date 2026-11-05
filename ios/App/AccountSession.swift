@@ -49,7 +49,13 @@ struct KeychainSessionStore: SessionPersistence {
     /// Refreshes preserve identity; accepting or clearing a session replaces it.
     var sessionIdentity: UUID { generation }
     var onCleared: (() -> Void)?
+    var onUserChanged: (() -> Void)?
     var user: User? { stored?.tokens.user }
+    var cloudServicesAllowed: Bool { user?.accountStatus.state == "active" }
+    var restrictionMessage: String? {
+        guard let user, !cloudServicesAllowed else { return nil }
+        return user.accountStatus.publicMessage ?? "This account cannot use voice input or cloud sync. Contact \(user.accountStatus.supportEmail) for help."
+    }
     init(api: APIClient, persistence: any SessionPersistence = KeychainSessionStore()) throws {
         self.api = api; secrets = persistence; stored = try persistence.load()
     }
@@ -62,6 +68,21 @@ struct KeychainSessionStore: SessionPersistence {
         try secrets.remove()
         generation = UUID(); refreshTask?.cancel(); refreshTask = nil; stored = nil
         onCleared?()
+    }
+    func updateUser(_ user: User) throws {
+        guard var current = stored, current.tokens.user.id == user.id else { throw CancellationError() }
+        current.tokens.user = user
+        // Enforce a restriction in memory even if secure storage is unavailable.
+        stored = current
+        defer { onUserChanged?() }
+        try secrets.save(current)
+    }
+    private func restrict(_ error: APIError) throws {
+        guard var user else { return }
+        user.accountStatus.state = error.code == "ACCOUNT_SUSPENDED" ? "suspended" : "banned"
+        user.accountStatus.suspendedUntil = nil
+        user.accountStatus.publicMessage = error.message
+        try updateUser(user)
     }
     /// False means local sign-out succeeded but server revocation was not confirmed.
     func signOut() async throws -> Bool {
@@ -93,7 +114,7 @@ struct KeychainSessionStore: SessionPersistence {
             let tokens = try await api.refresh(current.tokens.refreshToken)
             guard generation == expected, tokens.user.id == current.tokens.user.id else { throw CancellationError() }
             let next = StoredSession(tokens: tokens)
-            try secrets.save(next); stored = next
+            try secrets.save(next); stored = next; onUserChanged?()
             return next
         }
         refreshTask = task
@@ -105,20 +126,23 @@ struct KeychainSessionStore: SessionPersistence {
     }
     func call<T>(_ operation: (String) async throws -> T) async throws -> T {
         let expected = generation
-        let access = try await token()
-        guard generation == expected else { throw CancellationError() }
-        do {
-            let result = try await operation(access)
+        var refreshing = false
+        while true {
+            try Task.checkCancellation()
+            let access = try await token(force: refreshing)
             guard generation == expected else { throw CancellationError() }
-            return result
-        } catch let error as APIError where error.code == "TOKEN_EXPIRED" {
-            let replacement = try await token(force: true)
-            guard generation == expected else { throw CancellationError() }
-            let result = try await operation(replacement)
-            guard generation == expected else { throw CancellationError() }
-            return result
-        } catch let error as APIError where error.code == "AUTH_REQUIRED" || error.code == "SESSION_REVOKED" {
-            if generation == expected { try clear() }; throw error
+            try Task.checkCancellation()
+            do {
+                let result = try await operation(access)
+                guard generation == expected else { throw CancellationError() }
+                return result
+            } catch let error as APIError {
+                guard generation == expected else { throw CancellationError() }
+                if error.code == "TOKEN_EXPIRED", !refreshing { refreshing = true; continue }
+                if error.code == "AUTH_REQUIRED" || error.code == "SESSION_REVOKED" { try clear() }
+                if error.code == "ACCOUNT_SUSPENDED" || error.code == "ACCOUNT_BANNED" { try restrict(error) }
+                throw error
+            }
         }
     }
 }

@@ -26,6 +26,8 @@ Add `--fixture-large-text` to preview the main app at the largest accessibility 
 
 Add `--fixture-sync-limit` to `--fixture` to exercise a full cloud vocabulary with the local fake service. Settings shows the warning while the seeded vocabulary entry stays local; this does not alter any production limit or account.
 
+Add `--fixture-restricted` to `--fixture` to preview a suspended account with the local service. Voice controls are disabled and a status check remains available. This does not change the real account's status.
+
 [Distribution and privacy notes](DISTRIBUTION.md) describe provisioning, data declarations and remaining release gates.
 
 For a physical device select your own Apple development team for all targets, provision the `group.com.aliahad.wovoice.ios` App Group, and enable the same App Group on the app and keyboard. Never put signing keys or profiles in this repository. The default identifiers are `com.aliahad.wovoice.ios` and `com.aliahad.wovoice.ios.keyboard`; customize `WOVOICE_APP_GROUP` consistently if those identifiers belong to another team.
@@ -44,6 +46,8 @@ Voice and typing modes include the field's Return action (for example, Send, Sea
 Settings → Cloud sync shows the last sync time and any cloud limit or remaining-work warning. New vocabulary that cannot fit in the cloud stays on this device; other records continue syncing. A later successful retry clears the warning. Failed requests retain the previous sync time.
 
 Deleting an account requires fresh email verification for the current session. Cancelling keeps the account and local data. If the session changes during verification, start deletion again from the current account.
+
+For a restricted account, voice input and cloud sync stop while offline typing and local records remain available. Home explains the restriction. Use **Check account status** or **Refresh account and sync** after access is restored; the app confirms the new status with the server.
 
 iOS has no Android accessibility bubble. Password fields, phone pads, and apps that reject third-party keyboards use the system keyboard. The keyboard cannot identify WhatsApp/Mail or read whole conversations. Automatic context uses exposed field traits and, only with consent, bounded cursor snippets. No unsupported URL-opening or private APIs are used.
 

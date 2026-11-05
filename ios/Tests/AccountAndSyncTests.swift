@@ -130,10 +130,10 @@ private final class FixtureAuthentication: AccountAuthenticating {
         let config = URLSessionConfiguration.ephemeral; config.protocolClasses = [FixtureProtocol.self]
         return APIClient(baseURL: URL(string: "https://fixture.invalid")!, session: URLSession(configuration: config))
     }
-    private func tokens(_ access: String = "access", owner: String = "alice") throws -> Tokens {
+    private func tokens(_ access: String = "access", owner: String = "alice", state: String = "active") throws -> Tokens {
         try JSONDecoder().decode(Tokens.self, from: Data("""
         {"accessToken":"\(access)","refreshToken":"refresh","accessExpiresIn":900,"refreshExpiresIn":2592000,
-         "user":{"id":"\(owner)","email":"fixture@example.test","role":"user","accountStatus":{"state":"active","supportEmail":"support@example.test"}}}
+         "user":{"id":"\(owner)","email":"fixture@example.test","role":"user","accountStatus":{"state":"\(state)","supportEmail":"support@example.test"}}}
         """.utf8))
     }
     @Test func missingEditorIdentityIsSafeDuringKeyboardTeardown() {
@@ -737,5 +737,65 @@ private final class FixtureAuthentication: AccountAuthenticating {
         #expect(model.owner == "alice" && persistence.value != nil && !model.busy)
         #expect(model.message == "Verify your email again.")
         #expect(try model.store.records(owner: "alice", type: .dictionary).count == 1)
+    }
+    @Test func restrictedSavedSessionsCannotStartTheMicrophoneOrSync() async throws {
+        for state in ["suspended", "banned"] {
+            let capture = RetryCapture(); let persistence = MemorySessionStore()
+            persistence.value = StoredSession(tokens: try tokens(state: state))
+            let model = try AppModel(api: api(), persistence: persistence, capture: capture, databaseURL: URL(fileURLWithPath: ":memory:"))
+            defer { model.stopSession() }
+            try model.store.save(owner: "alice", record: .init(id: "word", type: .dictionary, payload: RecordPayload.dictionary("Keep this")))
+            try model.reload(); FixtureProtocol.router.configure { _,_ in (503, Data()) }
+            await model.startSession(keyboard: false); await model.sync()
+            #expect(capture.starts == 0 && !model.microphoneActive)
+            #expect(FixtureProtocol.router.captured().isEmpty)
+            #expect(model.owner == "alice" && model.dictionary.count == 1)
+        }
+    }
+    @Test func restrictionDuringDictationStopsTheKeyboardSessionAndSurvivesRestart() async throws {
+        FixtureProtocol.router.configure { _,_ in (403, Data(#"{"error":{"code":"ACCOUNT_SUSPENDED","message":"Temporarily unavailable.","retryable":false}}"#.utf8)) }
+        let capture = RetryCapture(); let persistence = MemorySessionStore()
+        let model = try AppModel(api: api(), persistence: persistence, capture: capture, databaseURL: URL(fileURLWithPath: ":memory:"))
+        defer { model.stopSession() }
+        try model.account.accept(tokens()); try model.reload()
+        await model.startSession(); model.toggleRecording(); model.toggleRecording()
+        for _ in 0..<100 where model.status.phase == "processing" { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(!model.microphoneActive && !model.keyboardSessionActive && !model.status.canRetry)
+        #expect(model.account.user?.accountStatus.state == "suspended")
+        #expect(persistence.value?.tokens.user.accountStatus.publicMessage == "Temporarily unavailable.")
+        let restarted = try AccountSession(api: api(), persistence: persistence)
+        #expect(restarted.user?.accountStatus.state == "suspended")
+        await model.startSession(keyboard: false)
+        #expect(capture.starts == 1)
+    }
+    @Test func restrictionAfterTokenRefreshIsPersisted() async throws {
+        let refreshed = try JSONEncoder().encode(tokens("rotated"))
+        FixtureProtocol.router.configure { request,_ in
+            if request.url?.path == "/v1/auth/refresh" { return (200,refreshed) }
+            if request.value(forHTTPHeaderField: "Authorization") == "Bearer access" {
+                return (401,Data(#"{"error":{"code":"TOKEN_EXPIRED","message":"Expired","retryable":false}}"#.utf8))
+            }
+            return (403,Data(#"{"error":{"code":"ACCOUNT_BANNED","message":"Cloud services unavailable.","retryable":false}}"#.utf8))
+        }
+        let persistence = MemorySessionStore(); let account = try AccountSession(api: api(), persistence: persistence)
+        try account.accept(tokens())
+        await #expect(throws: APIError.self) { try await account.call { try await api().empty("/v1/transcriptions", method: "POST", token: $0) } }
+        #expect(account.user?.accountStatus.state == "banned")
+        #expect(persistence.value?.tokens.user.accountStatus.state == "banned")
+        #expect(FixtureProtocol.router.captured().count == 3)
+    }
+    @Test func refreshedProfileRestoresARestrictedSessionAndPersistsItsStatus() async throws {
+        let user = try JSONEncoder().encode(tokens().user)
+        let profile = Data("{\"user\":\(String(decoding:user,as:UTF8.self))}".utf8)
+        FixtureProtocol.router.configure { _,_ in (200,profile) }
+        let persistence = MemorySessionStore(); let capture = RetryCapture()
+        persistence.value = StoredSession(tokens: try tokens(state: "suspended"))
+        let model = try AppModel(api: api(), persistence: persistence, capture: capture, databaseURL: URL(fileURLWithPath: ":memory:"))
+        defer { model.stopSession() }
+        await model.refreshProfile()
+        #expect(model.account.user?.accountStatus.state == "active")
+        #expect(persistence.value?.tokens.user.accountStatus.state == "active")
+        await model.startSession(keyboard: false)
+        #expect(capture.starts == 1 && model.microphoneActive)
     }
 }

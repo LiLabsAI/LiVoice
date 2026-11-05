@@ -28,6 +28,7 @@ import WoVoiceCore
     var message: String?
     var busy = false
     var syncing = false
+    var refreshingProfile = false
     var lastSyncedAt: Date?
     var syncWarning: String?
     var lastText = ""
@@ -54,6 +55,7 @@ import WoVoiceCore
     private var observers: [NSObjectProtocol] = []
     private var loadedOwner: String?
     var owner: String? { account.user?.id }
+    var accountRestriction: String? { account.restrictionMessage }
     var recording: Bool { status.phase == "recording" }
     var microphoneActive: Bool { audio.active }
     var keyboardSessionActive: Bool { sessionKeyboard && audio.active && status.expiresAt > .now && sessionDeadline.map { clock() < $0 } == true }
@@ -72,6 +74,10 @@ import WoVoiceCore
             guard let self else { return }
             stopSession()
             do { try reload() } catch { message = error.localizedDescription }
+        }
+        account.onUserChanged = { [weak self] in
+            guard let self, let restriction = accountRestriction else { return }
+            stopSession(message: restriction)
         }
         _ = bridge.drainCommands()
         bridge.clearLeases()
@@ -131,9 +137,13 @@ import WoVoiceCore
         catch { message = error.localizedDescription }
     }
     func refreshProfile() async {
-        guard owner != nil else { return }
-        do { profile = try await account.call { try await account.api.request("/v1/me", token: $0) }
-            if profile?.user.accountStatus.state != "active" { stopSession(message: profile?.user.accountStatus.publicMessage ?? "This account cannot dictate right now.") }
+        guard owner != nil, !refreshingProfile else { return }
+        refreshingProfile = true; defer { refreshingProfile = false }
+        let expected = account.sessionIdentity
+        do {
+            let next: Profile = try await account.call { try await account.api.request("/v1/me", token: $0) }
+            guard account.sessionIdentity == expected else { throw CancellationError() }
+            try account.updateUser(next.user); profile = next
         } catch is CancellationError { }
         catch { message = error.localizedDescription; if owner == nil { stopSession(); try? reload() } }
     }
@@ -189,7 +199,7 @@ import WoVoiceCore
         catch { message = error.localizedDescription }
     }
     func sync() async {
-        guard owner != nil, !syncing else { return }; syncing = true; defer { syncing = false }
+        guard account.cloudServicesAllowed, !syncing else { return }; syncing = true; defer { syncing = false }
         do { try await syncService.run(); try reload() }
         catch is CancellationError { }
         catch { message = error.localizedDescription }
@@ -273,7 +283,7 @@ import WoVoiceCore
     func startSession(keyboard: Bool = true) async {
         guard !busy, !audio.active else { return }
         guard let owner else { message = "Sign in before starting dictation."; return }
-        if let profile, profile.user.accountStatus.state != "active" { message = profile.user.accountStatus.publicMessage ?? "This account cannot dictate."; return }
+        if let restriction = accountRestriction { message = restriction; return }
         busy = true; defer { busy = false }
         let expected = generation
         do {
@@ -315,11 +325,12 @@ import WoVoiceCore
         _ = bridge.drainCommands(); bridge.clearLeases(); publish()
     }
     func toggleRecording() {
+        guard account.cloudServicesAllowed else { stopSession(message: accountRestriction); return }
         if recording { finish() }
         else if status.phase != "processing" { begin(request: UUID(), fromKeyboard: false, context: nil, sentenceStart: true) }
     }
     private func begin(request: UUID, fromKeyboard: Bool, context: DictationContext?, sentenceStart: Bool) {
-        guard audio.active, status.phase != "processing", !recording else { return }
+        guard account.cloudServicesAllowed, audio.active, status.phase != "processing", !recording else { return }
         generation = UUID(); retryAudio = nil; currentContext = context ?? DictationContext.capture(preferences: preferences, field: .text, before: nil, after: nil); self.sentenceStart = sentenceStart; keyboardRequest = fromKeyboard
         status.request = request; status.result = nil
         lastLeaseID = nil; leaseDeadline = fromKeyboard ? clock().advanced(by: .seconds(4)) : nil
@@ -347,6 +358,7 @@ import WoVoiceCore
         } catch { status.phase = "error"; status.message = error.localizedDescription; currentContext = nil; if !sessionKeyboard { audio.stopSession() }; publish() }
     }
     func retry() {
+        guard account.cloudServicesAllowed else { stopSession(message: accountRestriction); return }
         guard status.phase == "error" else { return }
         guard let retryAudio, retryAudio.expiresAt > .now, retryAudio.attempts < 2 else { cancelRecording(); return }
         self.retryAudio = (retryAudio.wav, retryAudio.duration, retryAudio.expiresAt, retryAudio.attempts + 1)
@@ -409,6 +421,7 @@ import WoVoiceCore
         }
     }
     private func tick() {
+        guard account.cloudServicesAllowed else { stopSession(message: accountRestriction); return }
         guard owner == status.owner, audio.active || (!sessionKeyboard && (status.phase == "processing" || status.phase == "error")) else { stopSession(); return }
         guard status.expiresAt > .now, sessionDeadline.map({ clock() < $0 }) == true else {
             stopSession(message: sessionKeyboard ? "Keyboard session ended after five minutes. Open WoVoice to start again." : "Dictation timed out. Please try again."); return

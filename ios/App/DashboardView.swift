@@ -75,14 +75,19 @@ struct HomeView: View {
                                 if model.status.phase == "processing" { ProgressView().tint(Color(uiColor: .systemBackground)) }
                                 else { Image(systemName: model.recording ? "stop.fill" : "mic.fill").font(.system(size: 34)).foregroundStyle(Color(uiColor: .systemBackground)) }
                             }
-                        }.buttonStyle(.plain).disabled(model.busy || model.status.phase == "processing")
+                        }.buttonStyle(.plain).disabled(model.busy || model.status.phase == "processing" || model.accountRestriction != nil)
                             .accessibilityLabel(model.recording ? "Finish dictation" : "Start dictation").accessibilityIdentifier("dictate")
                         if model.recording && model.waveform {
                             HStack(spacing: 5) {
                                 ForEach(0..<5) { i in Capsule().fill(.primary).frame(width: 4, height: 8 + min(32, model.status.level * 400) * (i == 2 ? 1 : 0.65)) }
                             }.frame(height: 40).animation(reduceMotion || !model.animations ? nil : .easeOut(duration: 0.12), value: model.status.level).accessibilityHidden(true)
                         }
-                        Text(model.recording ? "Listening · \(Int(model.status.elapsed))s / 60s" : model.status.phase == "processing" ? "Turning speech into text…" : "Tap to speak").font(.headline)
+                        Text(model.recording ? "Listening · \(Int(model.status.elapsed))s / 60s" : model.status.phase == "processing" ? "Turning speech into text…" : model.accountRestriction != nil ? "Voice input unavailable" : "Tap to speak").font(.headline)
+                        if let restriction = model.accountRestriction {
+                            Text(restriction).font(.subheadline).foregroundStyle(.red)
+                            Button(model.refreshingProfile ? "Checking account…" : "Check account status") { Task { await model.refreshProfile() } }
+                                .disabled(model.refreshingProfile || model.busy)
+                        }
                         if model.status.phase == "error" {
                             Text(model.status.message).font(.subheadline).foregroundStyle(.secondary)
                             if model.status.canRetry { Button("Retry upload") { model.retry() }.buttonStyle(.bordered) }
@@ -120,7 +125,7 @@ struct HomeView: View {
                 Text("English (India) · Up to 60 seconds per dictation").font(.caption).foregroundStyle(.secondary)
             }.padding(24).frame(maxWidth: 720, alignment: .leading).frame(maxWidth: .infinity)
         }.navigationTitle("WoVoice").toolbar {
-            if model.owner != nil { Button { Task { await model.sync() } } label: { if model.syncing { ProgressView() } else { Image(systemName: "arrow.triangle.2.circlepath") } }.disabled(model.syncing).accessibilityLabel("Sync now") }
+            if model.owner != nil { Button { Task { await model.refreshProfile(); await model.sync() } } label: { if model.syncing || model.refreshingProfile { ProgressView() } else { Image(systemName: "arrow.triangle.2.circlepath") } }.disabled(model.syncing || model.refreshingProfile).accessibilityLabel("Refresh account and sync") }
         }
     }
     private var adaptiveRow: AnyLayout {
@@ -137,7 +142,7 @@ struct HomeView: View {
             Text("During the session the microphone stays active. Audio between dictations is discarded. You can stop the session at any time; iOS’s microphone indicator remains visible.").font(.caption).foregroundStyle(.secondary)
             Button(model.keyboardSessionActive ? "Stop keyboard session" : "Start keyboard session") {
                 if model.keyboardSessionActive { model.stopSession() } else { Task { await model.startSession() } }
-            }.buttonStyle(.bordered).disabled(model.busy).accessibilityIdentifier("keyboardSession")
+            }.buttonStyle(.bordered).disabled(model.busy || (model.accountRestriction != nil && !model.keyboardSessionActive)).accessibilityIdentifier("keyboardSession")
         }.card()
     }
     private func metric(_ title: String, value: String) -> some View {
@@ -237,7 +242,7 @@ struct SettingsView: View {
                 if let user = model.account.user {
                     LabeledContent("Email", value: user.email)
                     NavigationLink("Signed-in devices") { SessionsView(model: model) }
-                    if let profile = model.profile, profile.user.accountStatus.state != "active" { Text(profile.user.accountStatus.publicMessage ?? "Account restricted").foregroundStyle(.red) }
+                    if let restriction = model.accountRestriction { Text(restriction).foregroundStyle(.red) }
                     Button("Sign out") { signingOut = true }.disabled(model.busy)
                 } else { Button("Sign in") { Task { await model.signIn() } }.disabled(model.busy) }
             }
@@ -262,7 +267,7 @@ struct SettingsView: View {
                     Picker("Auto-delete history", selection: Binding(get: { model.cloudSettings.historyRetentionDays ?? 0 }, set: { days in Task { await model.updateCloud(history: model.cloudSettings.historySyncEnabled, retention: days == 0 ? nil : days) } })) {
                         Text("Never").tag(0); Text("30 days").tag(30); Text("90 days").tag(90); Text("1 year").tag(365)
                     }
-                    Button(model.syncing ? "Syncing…" : "Sync now") { Task { await model.sync() } }.disabled(model.syncing)
+                    Button(model.syncing || model.refreshingProfile ? "Syncing…" : "Sync now") { Task { await model.refreshProfile(); await model.sync() } }.disabled(model.syncing || model.refreshingProfile)
                     if let lastSyncedAt = model.lastSyncedAt {
                         Text("Last synced \(lastSyncedAt.formatted(date: .abbreviated, time: .shortened))").font(.caption).foregroundStyle(.secondary)
                     } else { Text("Not synced yet on this device").font(.caption).foregroundStyle(.secondary) }

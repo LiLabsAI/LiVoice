@@ -54,7 +54,11 @@ private nonisolated final class DevelopmentServer: URLProtocol, @unchecked Senda
         var code = 200
         let data: Data
         switch path {
-        case "/v1/me": data = Data(#"{"user":{"id":"fixture","email":"sample@example.test","role":"user","accountStatus":{"state":"active","supportEmail":"support@example.test"}},"quota":{"limitAudioSeconds":600,"remainingAudioSeconds":600,"resetAt":1900000000000}}"#.utf8)
+        case "/v1/me":
+            let restricted = ProcessInfo.processInfo.arguments.contains("--fixture-restricted")
+            data = Data("""
+            {"user":{"id":"fixture","email":"sample@example.test","role":"user","accountStatus":{"state":"\(restricted ? "suspended" : "active")","publicMessage":"\(restricted ? "Voice input and cloud sync are temporarily unavailable. Offline typing and local data remain available." : "")","supportEmail":"support@example.test"}},"quota":{"limitAudioSeconds":600,"remainingAudioSeconds":600,"resetAt":1900000000000}}
+            """.utf8)
         case "/v1/transcriptions": data = Data("""
         {"text":"I would like to meet Professor Rahman tomorrow.","rawText":"i would like to meet professor rahman tomorrow","polished":true,"asrModel":"fixture-whisper","requestId":"\(UUID().uuidString)","timingsMs":{"asr":120,"polish":80,"total":200},"usage":null}
         """.utf8)

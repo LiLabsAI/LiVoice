@@ -14,7 +14,7 @@ final class SyncService {
         try await task.value
     }
     private func perform() async throws {
-        guard let owner = account.user?.id else { return }
+        guard let owner = account.user?.id, account.cloudServicesAllowed else { return }
         func checkOwner() throws { guard account.user?.id == owner else { throw CancellationError() } }
         while true {
             try checkOwner()
