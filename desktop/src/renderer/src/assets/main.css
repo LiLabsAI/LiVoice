@@ -54,24 +54,9 @@ body {
   font-size: 15px;
 }
 
-.brand-mark {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--mint);
-  position: relative;
-  overflow: hidden;
-}
-
-.brand-mark::after {
-  content: '';
-  position: absolute;
-  left: 7px;
-  top: 6px;
-  width: 2px;
-  height: 10px;
-  background: #1c1e1f;
-  box-shadow: 4px 0 0 #1c1e1f, -4px 0 0 #1c1e1f;
+.brand svg {
+  flex: none;
+  display: block;
 }
 
 .tabs {

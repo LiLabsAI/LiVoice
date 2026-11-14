@@ -4,7 +4,7 @@ import { App } from "./App";
 import "./styles.css";
 
 const root = document.getElementById("root");
-if (!root) throw new Error("WoVoice admin root is missing");
+if (!root) throw new Error("LiVoice admin root is missing");
 
 createRoot(root).render(
   <StrictMode>

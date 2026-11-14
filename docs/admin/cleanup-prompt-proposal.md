@@ -26,7 +26,7 @@ Keep the existing user prompt template and command instructions; they supply sen
 
 - With the original prompt, `yesterday i go to office and he dont have the report` became `Yesterday I went to the office, and he didn't have the report.` It passed validation in 2,705 ms.
 - With the revised proposal, `please cheque the attachment and send 2500 rupees to Rahim tomorrow i met Jon by the bank` became `Please check the attachment and send 2500 rupees to Rahim tomorrow. I met Jon by the bank.` It passed validation in 2,604 ms and retained the numeric string and both names.
-- Before the exact numeric-format instruction was added, the model changed `2500` to `2,500`. WoVoice rejected that candidate. Keep the numeric validation even with a stronger prompt.
+- Before the exact numeric-format instruction was added, the model changed `2500` to `2,500`. LiVoice rejected that candidate. Keep the numeric validation even with a stronger prompt.
 - `i has went` became `I have gone.` in the model candidate, but the current word-distance check rejected the correction because two of three words changed. The original recognition text was retained. A prompt alone cannot resolve that policy limitation.
 
 These are individual smoke checks, not accuracy or latency benchmarks. Future validation work should cover legitimate short grammar repairs while checking numbers, protected terms, negation, and changes in intent. Do not simply remove the rewrite limit globally.

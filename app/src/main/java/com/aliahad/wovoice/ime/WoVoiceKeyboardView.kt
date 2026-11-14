@@ -91,11 +91,11 @@ class WoVoiceKeyboardView(context: Context) : SwipeFrameLayout(context) {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             isClickable = true
-            contentDescription = "Open WoVoice settings"
+            contentDescription = "Open LiVoice settings"
         }
         brand.addView(VoiceMarkView(context), LinearLayout.LayoutParams(context.dp(24), context.dp(24)))
         brand.addView(TextView(context).apply {
-            text = "WoVoice"
+            text = "LiVoice"
             styleText(19f)
             gravity = Gravity.CENTER_VERTICAL
             typeface = Typeface.create("sans-serif", Typeface.BOLD)

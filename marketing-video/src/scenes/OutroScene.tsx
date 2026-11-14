@@ -19,7 +19,7 @@ export const OutroScene: React.FC = () => {
         }}
       >
         <Img
-          src={staticFile('assets/wovoice-logo.svg')}
+          src={staticFile('assets/livoice-logo.svg')}
           style={{
             width: 176,
             height: 176,
@@ -47,7 +47,7 @@ export const OutroScene: React.FC = () => {
             }),
           }}
         >
-          Wo<span style={{color: colors.mint}}>Voice</span>
+          Li<span style={{color: colors.mint}}>Voice</span>
         </div>
         <div
           style={{

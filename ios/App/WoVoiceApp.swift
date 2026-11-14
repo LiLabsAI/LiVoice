@@ -32,7 +32,7 @@ import SwiftUI
                     }
                     .onChange(of: AppRuntime.shared.pendingKeyboardSession) { _, _ in startRequestedSession(model) }
             }
-            else { ContentUnavailableView("WoVoice couldn’t open", systemImage: "externaldrive.badge.exclamationmark", description: Text(startupError ?? "Please restart the app.")) }
+            else { ContentUnavailableView("LiVoice couldn’t open", systemImage: "externaldrive.badge.exclamationmark", description: Text(startupError ?? "Please restart the app.")) }
         }
     }
     @ViewBuilder private func dashboard(_ model: AppModel) -> some View {

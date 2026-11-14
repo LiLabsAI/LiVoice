@@ -1,10 +1,10 @@
 {
   "name": "marketing-video",
   "version": "1.0.0",
-  "description": "Editable WoVoice product marketing video",
+  "description": "Editable LiVoice product marketing video",
   "repository": {
     "type": "git",
-    "url": "https://github.com/aliahadmd/wovoice.git",
+    "url": "https://github.com/LiLabsAI/LiVoice.git",
     "directory": "marketing-video"
   },
   "license": "UNLICENSED",

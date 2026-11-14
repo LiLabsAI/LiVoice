@@ -15,8 +15,8 @@ import Observation
     }
 }
 struct StartKeyboardSessionIntent: AppIntent {
-    static let title: LocalizedStringResource = "Start WoVoice keyboard session"
-    static let description = IntentDescription("Opens WoVoice and starts a five-minute microphone session for dictating from its keyboard.")
+    static let title: LocalizedStringResource = "Start LiVoice keyboard session"
+    static let description = IntentDescription("Opens LiVoice and starts a five-minute microphone session for dictating from its keyboard.")
     static let openAppWhenRun = true
     @MainActor func perform() async throws -> some IntentResult {
         // The system can invoke perform before the app's scene is active.

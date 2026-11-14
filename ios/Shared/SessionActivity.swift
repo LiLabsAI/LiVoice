@@ -13,7 +13,7 @@ nonisolated struct SessionActivityAttributes: ActivityAttributes {
     }
 }
 struct StopKeyboardSessionIntent: LiveActivityIntent {
-    static let title: LocalizedStringResource = "Stop WoVoice keyboard session"
+    static let title: LocalizedStringResource = "Stop LiVoice keyboard session"
     static let description = IntentDescription("Releases the microphone and cancels pending keyboard dictation.")
     @MainActor func perform() async throws -> some IntentResult {
         let bridge = KeyboardBridge()

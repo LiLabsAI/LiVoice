@@ -5,7 +5,7 @@ import callbackHtml from "../public/app/callback.html?raw";
 import callbackScript from "../public/app/callback.js?raw";
 
 describe("passwordless sign-in assets", () => {
-  it("loads WoVoice initialization before the explicit Turnstile callback", () => {
+  it("loads LiVoice initialization before the explicit Turnstile callback", () => {
     const appScript = authHtml.indexOf('src="/auth.js"');
     const turnstileScript = authHtml.indexOf("challenges.cloudflare.com/turnstile");
 

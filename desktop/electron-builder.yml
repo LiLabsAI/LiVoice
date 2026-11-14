@@ -1,5 +1,5 @@
 appId: com.aliahad.wovoice.desktop
-productName: WoVoice
+productName: LiVoice
 directories:
   buildResources: build
 files:
@@ -17,7 +17,7 @@ extraResources:
   - from: native/contextd
     to: contextd
 protocols:
-  - name: WoVoice
+  - name: LiVoice
     schemes: [wovoice]
 mac:
   category: public.app-category.productivity
@@ -27,11 +27,11 @@ mac:
     - target: dmg
     - target: dir
   extendInfo:
-    - NSMicrophoneUsageDescription: WoVoice needs microphone access to convert your speech into text.
-    - NSAppleEventsUsageDescription: WoVoice sends a paste keystroke to the app you are using to insert your dictated text.
+    - NSMicrophoneUsageDescription: LiVoice needs microphone access to convert your speech into text.
+    - NSAppleEventsUsageDescription: LiVoice sends a paste keystroke to the app you are using to insert your dictated text.
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   notarize: false
 dmg:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: livoice-desktop-${version}.${ext}
 npmRebuild: false

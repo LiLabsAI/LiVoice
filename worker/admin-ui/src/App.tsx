@@ -197,7 +197,7 @@ function LoginPage() {
       <section className="login-card" aria-labelledby="login-title">
         <Brand />
         <p className="eyebrow">PRIVATE ADMINISTRATION</p>
-        <h1 id="login-title">Sign in to WoVoice</h1>
+        <h1 id="login-title">Sign in to LiVoice</h1>
         <p className="muted">{message}</p>
         {!challengeId ? (
           <form onSubmit={sendCode} className="login-form">
@@ -214,7 +214,7 @@ function LoginPage() {
             <button type="button" className="text-button" onClick={() => location.reload()}>Start again</button>
           </form>
         )}
-        <p className="privacy-note">Protected by email verification, Turnstile, short-lived cookies, and the administrator role stored in WoVoice.</p>
+        <p className="privacy-note">Protected by email verification, Turnstile, short-lived cookies, and the administrator role stored in LiVoice.</p>
       </section>
     </main>
   );
@@ -275,7 +275,7 @@ function AdminPortal() {
     finally { location.replace("/login"); }
   }
 
-  if (!session && !error) return <FullPageStatus title="Opening WoVoice Admin" detail="Verifying your secure browser session…" />;
+  if (!session && !error) return <FullPageStatus title="Opening LiVoice Admin" detail="Verifying your secure browser session…" />;
   if (!session) return <FullPageStatus title="Admin console unavailable" detail={error} action={<button className="primary-button" onClick={signInRedirect}>Return to sign in</button>} />;
 
   const titles: Record<View, [string, string]> = {
@@ -440,7 +440,21 @@ function Audit({ onError }: { onError(message: string): void }) {
   </Panel>;
 }
 
-function Brand() { return <a className="brand" href="/admin/" aria-label="WoVoice admin home"><span className="mark" /><span>WoVoice</span></a>; }
+function Brand() {
+  return (
+    <a className="brand" href="/admin/" aria-label="LiVoice admin home">
+      <svg viewBox="0 0 108 108" width="28" height="28" aria-hidden="true">
+        <rect width="108" height="108" rx="24" fill="#1A1B22" stroke="#302C3D" strokeWidth="2" />
+        <path d="M 33.5,39.5 V 65.5 A 7.5,7.5 0 0 0 41,73 H 46" fill="none" stroke="#7DE4B6" strokeWidth="8.4" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="58.5" cy="41.5" r="4.6" fill="#AFA4FF" />
+        <path d="M 58.5,53.5 V 73" fill="none" stroke="#7DE4B6" strokeWidth="8.2" strokeLinecap="round" />
+        <path d="M 60.79,30.74 A 11,11 0 0 1 69.47,42.27" fill="none" stroke="#AFA4FF" strokeWidth="4.8" strokeLinecap="round" />
+        <path d="M 65.06,25.27 A 17.5,17.5 0 0 1 75.99,42.11" fill="none" stroke="#7DE4B6" strokeOpacity="0.92" strokeWidth="4.3" strokeLinecap="round" />
+      </svg>
+      <span>LiVoice</span>
+    </a>
+  );
+}
 function NavButton({ active, icon, children, onClick }: { active: boolean; icon: string; children: ReactNode; onClick(): void }) { return <button className={`nav-item ${active ? "active" : ""}`} onClick={onClick}><span>{icon}</span>{children}</button>; }
 function Panel({ title, kicker, children, className = "" }: { title?: string; kicker?: string; children: ReactNode; className?: string }) { return <section className={`panel ${className}`}>{title && <div className="panel-heading"><div>{kicker && <p className="eyebrow">{kicker}</p>}<h2>{title}</h2></div></div>}{children}</section>; }
 function Metric({ label, value, note }: { label: string; value: string; note: string }) { return <article className="metric"><p>{label}</p><strong>{value}</strong><small>{note}</small></article>; }

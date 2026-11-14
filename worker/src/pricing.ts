@@ -1,6 +1,6 @@
 import { CLEANUP_CHAT_OVERHEAD_TOKENS, CLEANUP_INPUT_BYTE_LIMIT, cleanupPricing } from "./ai-config";
 
-// Versioned Cloudflare Workers AI pricing for the WoVoice usage estimate.
+// Versioned Cloudflare Workers AI pricing for the LiVoice usage estimate.
 // handler.ts uses every constant here for response estimates; quota.ts uses the
 // ASR neuron rates for reservations. Change them together and bump PRICING_VERSION.
 export const PRICING_VERSION = "2026-11-02";

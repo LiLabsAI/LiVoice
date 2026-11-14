@@ -64,7 +64,7 @@ const post = async (path, body) => {
 };
 
 const showServiceError = (error) => {
-  console.error("WoVoice sign-in initialization failed", error);
+  console.error("LiVoice sign-in initialization failed", error);
   emailStep?.classList.add("hidden");
   codeStep?.classList.add("hidden");
   invalidStep?.classList.add("hidden");
@@ -81,7 +81,7 @@ async function boot() {
   if (intent === "delete") {
     document.querySelector("#auth-title").textContent = "Confirm account deletion";
     document.querySelector("#auth-intro").textContent =
-      "Enter your verified email. We’ll send a fresh code before deleting your WoVoice account.";
+      "Enter your verified email. We’ll send a fresh code before deleting your LiVoice account.";
     document.querySelector("#send").textContent = "Send deletion code";
     document.querySelector("#verify").textContent = "Verify and delete account";
     document.querySelector("#terms-row").classList.add("hidden");
@@ -89,9 +89,9 @@ async function boot() {
   }
 
   const configResponse = await fetch("/v1/auth/config", { headers: { Accept: "application/json" } });
-  if (!configResponse.ok) throw new Error("WoVoice could not load its sign-in configuration.");
+  if (!configResponse.ok) throw new Error("LiVoice could not load its sign-in configuration.");
   const config = await configResponse.json();
-  if (!config.turnstileSiteKey) throw new Error("WoVoice sign-in is not configured.");
+  if (!config.turnstileSiteKey) throw new Error("LiVoice sign-in is not configured.");
 
   await waitForTurnstile();
   if (typeof window.turnstile?.render !== "function") {

@@ -4,7 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="robots" content="noindex">
-    <title>Sign in to WoVoice</title>
+    <title>Sign in to LiVoice</title>
+    <link rel="icon" href="/media/logo.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/styles.css">
     <script src="/auth.js" defer></script>
     <script
@@ -14,7 +15,7 @@
   </head>
   <body>
     <main>
-      <div class="brand"><span class="mark" aria-hidden="true"></span>WoVoice</div>
+      <div class="brand"><span class="mark" aria-hidden="true"></span>LiVoice</div>
 
       <section class="card" id="email-step">
         <h2 id="auth-title">Sign in or register</h2>
@@ -43,15 +44,15 @@
             <label for="code">Verification code</label>
             <input class="code" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
           </div>
-          <button id="verify" type="submit">Verify and return to WoVoice</button>
+          <button id="verify" type="submit">Verify and return to LiVoice</button>
           <div class="actions"><button class="secondary" id="restart" type="button">Use another email</button></div>
           <p class="status" id="code-status" role="status"></p>
         </form>
       </section>
 
       <section class="card hidden" id="invalid-step">
-        <h2>Open this page from WoVoice</h2>
-        <p class="note">The secure sign-in request is missing. Return to the WoVoice app and tap Sign in.</p>
+        <h2>Open this page from LiVoice</h2>
+        <p class="note">The secure sign-in request is missing. Return to the LiVoice app and tap Sign in.</p>
       </section>
 
       <section class="card hidden" id="service-error-step">

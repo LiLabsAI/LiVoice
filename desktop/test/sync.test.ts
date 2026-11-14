@@ -98,7 +98,7 @@ class FakeCloud {
       this.afterPushApplied = null
       if (this.dropNextPushResponse) {
         this.dropNextPushResponse = false
-        throw new WorkerError('NETWORK_UNAVAILABLE', 'Could not reach WoVoice.', true, 0)
+        throw new WorkerError('NETWORK_UNAVAILABLE', 'Could not reach LiVoice.', true, 0)
       }
       return { applied }
     },
@@ -124,7 +124,7 @@ class FakeCloud {
       this.legacyMigrated = true
     },
     getVault: async () => {
-      if (this.legacyMigrated) throw new WorkerError('UPGRADE_REQUIRED', 'Update WoVoice.', false, 426)
+      if (this.legacyMigrated) throw new WorkerError('UPGRADE_REQUIRED', 'Update LiVoice.', false, 426)
       return this.legacyVault
     },
     pullLegacy: async (_token: string, cursor: number): Promise<LegacyPage> => ({

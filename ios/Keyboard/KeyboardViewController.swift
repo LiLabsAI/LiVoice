@@ -171,11 +171,11 @@ final class KeyboardViewController: UIInputViewController {
         }
         if let request, let owner = status.owner, hasFullAccess, status.available {
             do { try bridge.renewLease(request: request, owner: owner) }
-            catch { abandon(); localMessage = "Keyboard connection was lost. Open WoVoice to reconnect." }
+            catch { abandon(); localMessage = "Keyboard connection was lost. Open LiVoice to reconnect." }
         }
         if let request, status.request == request, status.phase == "result", let text = status.result, status.resultExpiresAt ?? .distantPast > .now {
             guard let target, let current = snapshot, target.matches(current), status.available, !sensitive else {
-                abandon(); localMessage = "Editor changed. Dictation is available in WoVoice History."; renderStatus(); return
+                abandon(); localMessage = "Editor changed. Dictation is available in LiVoice History."; renderStatus(); return
             }
             // Clear the request before insertText can synchronously notify textDidChange.
             pending.reset(); self.target = nil
@@ -189,7 +189,7 @@ final class KeyboardViewController: UIInputViewController {
         if let insertion {
             if !hasFullAccess || !status.available || status.owner != insertion.owner || sensitive {
                 self.insertion = nil
-                localMessage = "Insertion unconfirmed. Check the field or copy your text in WoVoice."
+                localMessage = "Insertion unconfirmed. Check the field or copy your text in LiVoice."
             } else {
                 switch insertion.verification.outcome(in: snapshot) {
                 case .waiting: break
@@ -199,7 +199,7 @@ final class KeyboardViewController: UIInputViewController {
                     feedback(); localMessage = "Inserted"
                 case .unconfirmed:
                     self.insertion = nil
-                    localMessage = "Insertion unconfirmed. Check the field or copy your text in WoVoice."
+                    localMessage = "Insertion unconfirmed. Check the field or copy your text in LiVoice."
                 }
             }
         }
@@ -216,8 +216,8 @@ final class KeyboardViewController: UIInputViewController {
         waveform.isHidden = phase != "recording" || !status.waveform || large
         waveform.update(level: status.level, animated: status.animate && !UIAccessibility.isReduceMotionEnabled)
         if !hasFullAccess { statusLabel.text = "Typing works offline. Allow Full Access in Settings for dictation." }
-        else if !status.available { statusLabel.text = localMessage ?? "Open WoVoice → Start keyboard session, then return here." }
-        else { statusLabel.text = localMessage ?? (phase == "recording" ? "Listening · \(Int(status.elapsed))s / 60s" : phase == "processing" ? "Thinking…" : phase == "error" ? status.message : large ? "Microphone active" : "WoVoice · Microphone session active") }
+        else if !status.available { statusLabel.text = localMessage ?? "Open LiVoice → Start keyboard session, then return here." }
+        else { statusLabel.text = localMessage ?? (phase == "recording" ? "Listening · \(Int(status.elapsed))s / 60s" : phase == "processing" ? "Thinking…" : phase == "error" ? status.message : large ? "Microphone active" : "LiVoice · Microphone session active") }
         microphone.isEnabled = hasFullAccess && status.available && !sensitive && phase != "processing" && phase != "starting"
         let label = phase == "starting" ? "Starting…" : phase == "recording" ? "Finish" : phase == "processing" ? "Thinking" : phase == "error" && status.canRetry ? "Retry" : "Speak"
         microphone.configuration?.title = large && (phase == "starting" || phase == "processing") ? "Wait" : label
@@ -233,7 +233,7 @@ final class KeyboardViewController: UIInputViewController {
         voiceButton.configuration?.baseBackgroundColor = microphone.configuration?.baseBackgroundColor
         voiceButton.configuration?.baseForegroundColor = .systemBackground
         voiceButton.accessibilityLabel = phase == "recording" ? "Finish dictation" : phase == "starting" ? "Starting dictation" : phase == "processing" ? "Processing dictation" : phase == "error" && status.canRetry ? "Retry dictation upload" : "Start dictation"
-        voiceHint.text = phase == "recording" ? "Tap Finish when you’re done" : phase == "processing" ? "Turning speech into text…" : !hasFullAccess ? "Typing works without Full Access" : !status.available ? "Start a keyboard session in WoVoice" : "Tap to speak · up to 60 seconds"
+        voiceHint.text = phase == "recording" ? "Tap Finish when you’re done" : phase == "processing" ? "Turning speech into text…" : !hasFullAccess ? "Typing works without Full Access" : !status.available ? "Start a keyboard session in LiVoice" : "Tap to speak · up to 60 seconds"
         voiceButton.accessibilityHint = voiceHint.text
         microphone.accessibilityLabel = voiceButton.accessibilityLabel
         microphone.accessibilityHint = voiceHint.text
@@ -256,7 +256,7 @@ final class KeyboardViewController: UIInputViewController {
             else if status.phase == "error", status.canRetry { send(.retry, request: request) }
             else if status.phase == "error" { abandon(); speak() }
         } else {
-            guard let current = snapshot, current.exposesContext else { localMessage = "This editor does not expose a safe insertion target. Dictate in WoVoice and copy your text."; renderStatus(); return }
+            guard let current = snapshot, current.exposesContext else { localMessage = "This editor does not expose a safe insertion target. Dictate in LiVoice and copy your text."; renderStatus(); return }
             let id = UUID(); pending.begin(id: id); target = current
             try? bridge.renewLease(request: id, owner: status.owner ?? "")
             send(.start, request: id, context: DictationContext.capture(preferences: status.preferences, field: field, before: current.before, after: current.after))
@@ -271,7 +271,7 @@ final class KeyboardViewController: UIInputViewController {
     }
     private func abandon() {
         if let request { send(.cancel, request: request); bridge.removeLease(request: request) }
-        if insertion != nil { localMessage = "Insertion unconfirmed. Check the field or copy your text in WoVoice." }
+        if insertion != nil { localMessage = "Insertion unconfirmed. Check the field or copy your text in LiVoice." }
         pending.reset(); target = nil; insertion = nil
     }
     private func learnCorrection() {

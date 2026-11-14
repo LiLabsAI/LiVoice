@@ -53,7 +53,7 @@ jobs:
           test -n "$VERSION"
           test -n "$CODE"
           echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
-          printf 'Publishing WoVoice %s (versionCode %s)\n' "$VERSION" "$CODE"
+          printf 'Publishing LiVoice %s (versionCode %s)\n' "$VERSION" "$CODE"
 
       - name: Test Worker and admin portal
         working-directory: worker
@@ -98,8 +98,8 @@ jobs:
           printf 'Verified release certificate SHA-256: %s\n' "$ACTUAL_CERT"
           test "$ACTUAL_CERT" = "$NORMALIZED_EXPECTED"
           mkdir -p release
-          cp "$APK" "release/WoVoice-$RELEASE_VERSION.apk"
-          (cd release && sha256sum "WoVoice-$RELEASE_VERSION.apk" > "WoVoice-$RELEASE_VERSION.apk.sha256")
+          cp "$APK" "release/LiVoice-$RELEASE_VERSION.apk"
+          (cd release && sha256sum "LiVoice-$RELEASE_VERSION.apk" > "LiVoice-$RELEASE_VERSION.apk.sha256")
 
       - name: Publish GitHub release
         env:
@@ -120,10 +120,10 @@ jobs:
           Path("release/notes.md").write_text(notes + "\n")
           PY
           gh release create "v$RELEASE_VERSION" \
-            "release/WoVoice-$RELEASE_VERSION.apk" \
-            "release/WoVoice-$RELEASE_VERSION.apk.sha256" \
+            "release/LiVoice-$RELEASE_VERSION.apk" \
+            "release/LiVoice-$RELEASE_VERSION.apk.sha256" \
             --target "$GITHUB_SHA" \
-            --title "WoVoice $RELEASE_VERSION" \
+            --title "LiVoice $RELEASE_VERSION" \
             --notes-file release/notes.md
 
   # Builds and publishes the macOS DMG the README documents as a download —
@@ -146,7 +146,7 @@ jobs:
           VERSION=$(node -p "require('./desktop/package.json').version")
           test -n "$VERSION"
           echo "DESKTOP_VERSION=$VERSION" >> "$GITHUB_ENV"
-          printf 'Publishing WoVoice Desktop %s\n' "$VERSION"
+          printf 'Publishing LiVoice Desktop %s\n' "$VERSION"
 
       - name: Install dependencies
         working-directory: desktop
@@ -181,7 +181,7 @@ jobs:
       - name: Verify macOS release bundle
         run: |
           set -euo pipefail
-          APP=$(find desktop/dist -maxdepth 2 -type d -name WoVoice.app -print -quit)
+          APP=$(find desktop/dist -maxdepth 2 -type d -name LiVoice.app -print -quit)
           test -n "$APP"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "$DESKTOP_VERSION"
           codesign --verify --deep --strict --verbose=2 "$APP"
@@ -189,7 +189,7 @@ jobs:
             test -x "$APP/Contents/Resources/$HELPER"
             codesign --verify --strict --verbose=2 "$APP/Contents/Resources/$HELPER"
           done
-          ELECTRON_RUN_AS_NODE=1 "$APP/Contents/MacOS/WoVoice" -e 'if (!process.versions.electron) process.exit(1); console.log("Electron runtime loaded:", process.versions.electron)'
+          ELECTRON_RUN_AS_NODE=1 "$APP/Contents/MacOS/LiVoice" -e 'if (!process.versions.electron) process.exit(1); console.log("Electron runtime loaded:", process.versions.electron)'
 
       - name: Publish desktop release
         env:
@@ -197,7 +197,7 @@ jobs:
         run: |
           set -euo pipefail
           TAG="desktop-v$DESKTOP_VERSION"
-          DMG="desktop/dist/wovoice-desktop-$DESKTOP_VERSION.dmg"
+          DMG="desktop/dist/livoice-desktop-$DESKTOP_VERSION.dmg"
           test -f "$DMG"
           (cd desktop/dist && shasum -a 256 "$(basename "$DMG")" > "$(basename "$DMG").sha256")
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -205,6 +205,6 @@ jobs:
           else
             gh release create "$TAG" "$DMG" "$DMG.sha256" \
               --target "$GITHUB_SHA" \
-              --title "WoVoice Desktop $DESKTOP_VERSION" \
-              --notes "WoVoice Desktop $DESKTOP_VERSION release. See the repository README for install instructions."
+              --title "LiVoice Desktop $DESKTOP_VERSION" \
+              --notes "LiVoice Desktop $DESKTOP_VERSION release. See the repository README for install instructions."
           fi

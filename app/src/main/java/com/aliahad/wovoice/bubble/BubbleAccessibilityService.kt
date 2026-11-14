@@ -254,7 +254,7 @@ class BubbleAccessibilityService : AccessibilityService() {
             onCancel = ::cancelWork,
             onHide = {
                 settings.floatingBubbleEnabled = false
-                Toast.makeText(this, "Bubble hidden. Turn it on again in WoVoice Settings.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Bubble hidden. Turn it on again in LiVoice Settings.", Toast.LENGTH_LONG).show()
             },
             onDrag = { dx, dy, finished ->
                 bubbleParams?.let { params ->
@@ -280,7 +280,7 @@ class BubbleAccessibilityService : AccessibilityService() {
             gravity = Gravity.TOP or Gravity.LEFT
             x = (settings.bubblePositionX * bounds.width()).toInt()
             y = (settings.bubblePositionY * bounds.height()).toInt()
-            title = "WoVoice dictation bubble"
+            title = "LiVoice dictation bubble"
         }
         bubble = view
         bubbleParams = params
@@ -612,7 +612,7 @@ class BubbleAccessibilityService : AccessibilityService() {
         val cancel = PendingIntent.getService(this, 1, Intent(this, javaClass).setAction(ACTION_CANCEL), PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_mic_small)
-            .setContentTitle("WoVoice is listening")
+            .setContentTitle("LiVoice is listening")
             .setContentText("Tap the bubble to finish, or cancel this recording.")
             .setContentIntent(open)
             .addAction(0, "Cancel", cancel)

@@ -165,11 +165,11 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
             return
         }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            showError("Allow microphone access in WoVoice settings.")
+            showError("Allow microphone access in LiVoice settings.")
             return
         }
         if (!account.signedIn) {
-            showError("Sign in to WoVoice to use voice input.")
+            showError("Sign in to LiVoice to use voice input.")
             return
         }
         if (!account.cloudServicesAllowed) {
@@ -191,7 +191,7 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
             ContextCompat.startForegroundService(this, Intent(this, VoiceCaptureService::class.java))
             if (captureBinder == null) pendingCapture = true else beginBoundCapture()
         } catch (_: Exception) {
-            showError("The microphone could not start. Open WoVoice settings and try again.")
+            showError("The microphone could not start. Open LiVoice settings and try again.")
         }
     }
 
@@ -370,7 +370,7 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
                         }
                         when {
                             profile !is AccountResult.Success -> showError(
-                                "WoVoice could not confirm your account status. The text was not inserted; tap to try again.",
+                                "LiVoice could not confirm your account status. The text was not inserted; tap to try again.",
                             )
                             account.cloudServicesAllowed -> commitFinalText(result, audioDurationMs)
                             else -> showError(

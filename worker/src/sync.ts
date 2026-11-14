@@ -40,7 +40,7 @@ export async function handleSyncRoute(request: Request, env: AppEnv, requestId: 
   const legacy = await env.DB.prepare("SELECT sync_v1_migrated_at FROM users WHERE id = ?")
     .bind(principal.userId).first<{ sync_v1_migrated_at: number | null }>();
   if ((legacy?.sync_v1_migrated_at ?? null) !== null || v1Sunset(env)) {
-    throw new ApiError(426, "UPGRADE_REQUIRED", false, "Update WoVoice to keep syncing. Sync now works with just your account.");
+    throw new ApiError(426, "UPGRADE_REQUIRED", false, "Update LiVoice to keep syncing. Sync now works with just your account.");
   }
   // Sync routes were previously unthrottled; every pull also writes activity
   // rows, so a runaway token could drive unbounded D1 usage. The ceiling is

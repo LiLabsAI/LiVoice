@@ -109,7 +109,7 @@ export class WorkerClient {
     try {
       response = await fetch(`${this.baseUrl}${path}`, { ...init, signal: AbortSignal.timeout(timeoutMs) })
     } catch {
-      throw new WorkerError('NETWORK_UNAVAILABLE', 'Could not reach WoVoice.', true, 0)
+      throw new WorkerError('NETWORK_UNAVAILABLE', 'Could not reach LiVoice.', true, 0)
     }
     const body = (await response.json().catch(() => null)) as
       | (T & { error?: { code: string; message: string; retryable?: boolean } })
@@ -118,7 +118,7 @@ export class WorkerClient {
       const error = body?.error
       throw new WorkerError(
         error?.code ?? `HTTP_${response.status}`,
-        error?.message ?? `WoVoice request failed (${response.status}).`,
+        error?.message ?? `LiVoice request failed (${response.status}).`,
         error?.retryable ?? response.status >= 500,
         response.status
       )
@@ -193,7 +193,7 @@ export class WorkerClient {
         signal: AbortSignal.timeout(SYNC_TIMEOUT_MS)
       })
     } catch {
-      throw new WorkerError('NETWORK_UNAVAILABLE', 'Could not reach WoVoice.', true, 0)
+      throw new WorkerError('NETWORK_UNAVAILABLE', 'Could not reach LiVoice.', true, 0)
     }
     const body = (await response.json().catch(() => null)) as
       | (Record<string, unknown> & {
@@ -307,7 +307,7 @@ export class WorkerClient {
         signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS)
       })
     } catch {
-      throw new WorkerError('NETWORK_UNAVAILABLE', 'Could not reach WoVoice.', true, 0)
+      throw new WorkerError('NETWORK_UNAVAILABLE', 'Could not reach LiVoice.', true, 0)
     }
     const body = (await response.json().catch(() => null)) as
       | (Record<string, unknown> & { error?: { code: string; message: string; retryable?: boolean } })

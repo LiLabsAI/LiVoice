@@ -1,13 +1,26 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" role="img" aria-labelledby="title description">
-  <title id="title">WoVoice</title>
-  <desc id="description">A mint-green audio waveform on a dark rounded square.</desc>
-  <rect width="108" height="108" rx="24" fill="#252528"/>
-  <circle cx="54" cy="54" r="34" fill="#7DE4B6"/>
-  <g fill="#1C1E1F">
-    <rect x="34" y="47" width="7" height="14" rx="3.5"/>
-    <rect x="42.5" y="39" width="7" height="30" rx="3.5"/>
-    <rect x="51" y="31" width="7" height="46" rx="3.5"/>
-    <rect x="59.5" y="39" width="7" height="30" rx="3.5"/>
-    <rect x="68" y="47" width="7" height="14" rx="3.5"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
+  <defs>
+    <radialGradient id="lv-bg" cx="50%" cy="38%" r="72%">
+      <stop offset="0%" stop-color="#262832"/>
+      <stop offset="55%" stop-color="#1A1B22"/>
+      <stop offset="100%" stop-color="#121318"/>
+    </radialGradient>
+    <radialGradient id="lv-mint-glow" cx="43.5%" cy="53.7%" r="41%">
+      <stop offset="0%" stop-color="#7DE4B6" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#7DE4B6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="lv-lilac-glow" cx="59.3%" cy="34.3%" r="32%">
+      <stop offset="0%" stop-color="#AFA4FF" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#AFA4FF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="108" height="108" rx="24" fill="url(#lv-bg)"/>
+  <rect width="108" height="108" rx="24" fill="url(#lv-mint-glow)"/>
+  <rect width="108" height="108" rx="24" fill="url(#lv-lilac-glow)"/>
+  <rect x="0.75" y="0.75" width="106.5" height="106.5" rx="23.25" fill="none" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="1.5"/>
+  <path d="M 33.5,39.5 V 65.5 A 7.5,7.5 0 0 0 41,73 H 46" fill="none" stroke="#7DE4B6" stroke-width="8.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="58.5" cy="41.5" r="4.6" fill="#AFA4FF"/>
+  <path d="M 58.5,53.5 V 73" fill="none" stroke="#7DE4B6" stroke-width="8.2" stroke-linecap="round"/>
+  <path d="M 60.79,30.74 A 11,11 0 0 1 69.47,42.27" fill="none" stroke="#AFA4FF" stroke-width="4.8" stroke-linecap="round"/>
+  <path d="M 65.06,25.27 A 17.5,17.5 0 0 1 75.99,42.11" fill="none" stroke="#7DE4B6" stroke-opacity="0.92" stroke-width="4.3" stroke-linecap="round"/>
 </svg>

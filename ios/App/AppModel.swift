@@ -349,7 +349,7 @@ import WoVoiceCore
         sessionDeadline = nil; recordingStartedAt = nil; leaseDeadline = nil; lastLeaseID = nil
         if let id = activityID { Task { await SessionActivities.end(id: id) } }
         activityID = nil
-        status = KeyboardStatus(); status.message = message ?? "Open WoVoice to start a keyboard session."
+        status = KeyboardStatus(); status.message = message ?? "Open LiVoice to start a keyboard session."
         _ = bridge.drainCommands(); bridge.clearLeases(); publish()
     }
     func toggleRecording() {
@@ -452,7 +452,7 @@ import WoVoiceCore
         guard account.cloudServicesAllowed else { stopSession(message: accountRestriction); return }
         guard owner == status.owner, audio.active || (!sessionKeyboard && (status.phase == "processing" || status.phase == "error")) else { stopSession(); return }
         guard status.expiresAt > .now, sessionDeadline.map({ clock() < $0 }) == true else {
-            stopSession(message: sessionKeyboard ? "Keyboard session ended after five minutes. Open WoVoice to start again." : "Dictation timed out. Please try again."); return
+            stopSession(message: sessionKeyboard ? "Keyboard session ended after five minutes. Open LiVoice to start again." : "Dictation timed out. Please try again."); return
         }
         let meter = audio.meter; status.level = meter.level; status.elapsed = meter.duration
         if keyboardRequest, let request = status.request, let deadline = leaseDeadline {

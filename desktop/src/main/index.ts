@@ -222,7 +222,7 @@ async function adoptAccount(tokens: WorkerTokens): Promise<boolean> {
         cancelId: 1,
         message: `Sign in as ${tokens.user.email}?`,
         detail:
-          'This Mac holds history and dictionary items from a different WoVoice account. ' +
+          'This Mac holds history and dictionary items from a different LiVoice account. ' +
           'They will be removed from this Mac so they never mix with or sync into this account. ' +
           `Anything already synced stays in the other account's encrypted vault.${lost}`
       })
@@ -321,7 +321,7 @@ function createDashboard(): void {
     height: 720,
     show: false,
     autoHideMenuBar: true,
-    title: 'WoVoice',
+    title: 'LiVoice',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
@@ -359,14 +359,14 @@ function rebuildTrayMenu(): void {
   const signedIn = session.hasRefreshToken
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: 'WoVoice dashboard', click: showDashboard },
+      { label: 'LiVoice dashboard', click: showDashboard },
       signedIn
         ? { label: email ?? 'Signed in', enabled: false }
         : { label: 'Sign in…', click: startSignIn },
       ...(signedIn ? [{ label: 'Sign out', click: (): void => { void signOut() } }] : []),
       { type: 'separator' },
       {
-        label: 'Quit WoVoice',
+        label: 'Quit LiVoice',
         click: (): void => {
           triggers.unregister()
           app.quit()
@@ -382,7 +382,7 @@ function createTray(): void {
   const trayImage = nativeImage.createFromPath(trayTemplate).resize({ width: 16, height: 16 })
   trayImage.setTemplateImage(true)
   tray = new Tray(trayImage)
-  tray.setToolTip('WoVoice')
+  tray.setToolTip('LiVoice')
   rebuildTrayMenu()
   tray.on('click', showDashboard)
 }
@@ -531,7 +531,7 @@ app.whenReady().then(() => {
             cancelId: 1,
             message: 'Stop syncing history?',
             detail:
-              'WoVoice will delete the dictated text stored in your account. History already on this ' +
+              'LiVoice will delete the dictated text stored in your account. History already on this ' +
               'Mac and your other devices stays there; new dictations stay on the device that made them.'
           })
           if (response !== 0) return { ok: false, cancelled: true }

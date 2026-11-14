@@ -64,11 +64,11 @@ export function createHandler(
     }
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/v1/status")) {
       return Response.json({
-        name: "WoVoice API",
+        name: "LiVoice API",
         status: "online",
         apiVersion: "v1",
-        documentation: "https://github.com/aliahadmd/wovoice",
-        authentication: "Passwordless WoVoice account required for protected endpoints",
+        documentation: "https://github.com/LiLabsAI/LiVoice",
+        authentication: "Passwordless LiVoice account required for protected endpoints",
       });
     }
 

@@ -121,7 +121,7 @@ class TranscriptionClient {
                 )
             } else parseError(body, code)
         } catch (_: Exception) {
-            Result.Error("Could not reach WoVoice. Check your connection and try again.", true, "NETWORK_UNAVAILABLE")
+            Result.Error("Could not reach LiVoice. Check your connection and try again.", true, "NETWORK_UNAVAILABLE")
         } finally {
             activeConnection.compareAndSet(connection, null)
             connection.disconnect()
@@ -151,7 +151,7 @@ class TranscriptionClient {
         val code = connection.responseCode
         block(code, readResponse(connection, code))
     } catch (_: Exception) {
-        Result.Error("Could not reach WoVoice. Check your connection and try again.", true, "NETWORK_UNAVAILABLE")
+        Result.Error("Could not reach LiVoice. Check your connection and try again.", true, "NETWORK_UNAVAILABLE")
     } finally {
         activeConnection.compareAndSet(connection, null)
         connection.disconnect()
@@ -218,7 +218,7 @@ class TranscriptionClient {
         URI("${base.toASCIIString()}$path").toURL()
     }.getOrNull()
 
-    private fun invalidUrl() = Result.Error("WoVoice has an invalid service address.", false, "INVALID_URL")
+    private fun invalidUrl() = Result.Error("LiVoice has an invalid service address.", false, "INVALID_URL")
 
     private companion object {
         const val MAX_RESPONSE_CHARS = 1_000_000

@@ -19,7 +19,7 @@ struct DashboardView: View {
                 HStack { Text("Deleted"); Spacer(); Button("Undo") { model.undoDelete() }.fontWeight(.semibold) }.padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16)).padding(.horizontal)
             }
         }
-        .alert("WoVoice", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) {
+        .alert("LiVoice", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) {
             Button("OK", role: .cancel) { model.message = nil }
         } message: { Text(model.message ?? "") }
     }
@@ -43,14 +43,14 @@ struct HomeView: View {
                 if model.owner == nil || !dynamicTypeSize.isAccessibilitySize {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Your words.\nA little clearer.").font(.system(.largeTitle, design: .rounded, weight: .semibold)).tracking(-1)
-                        Text("Speak naturally. WoVoice handles the grammar and punctuation.").foregroundStyle(.secondary)
+                        Text("Speak naturally. LiVoice handles the grammar and punctuation.").foregroundStyle(.secondary)
                     }
                 }
                 if model.owner == nil {
                     VStack(alignment: .leading, spacing: 16) {
                         Label("One account, across your devices", systemImage: "person.crop.circle").font(.headline)
                         Text("Sign in securely with your email to dictate and sync your vocabulary. Audio is sent only when you choose to dictate.").foregroundStyle(.secondary)
-                        Button { Task { await model.signIn() } } label: { Text(model.busy ? "Opening sign-in…" : "Sign in to WoVoice").foregroundStyle(Color(uiColor: .systemBackground)).frame(maxWidth: .infinity) }
+                        Button { Task { await model.signIn() } } label: { Text(model.busy ? "Opening sign-in…" : "Sign in to LiVoice").foregroundStyle(Color(uiColor: .systemBackground)).frame(maxWidth: .infinity) }
                             .buttonStyle(.borderedProminent).disabled(model.busy).accessibilityIdentifier("signIn")
                     }.card()
                 } else {
@@ -117,13 +117,13 @@ struct HomeView: View {
                         if model.costEstimates {
                             LabeledContent("Estimated AI usage", value: String(format: "$%.4f", metrics.cost))
                             Text(String(format: "%.1f neurons · ASR %.1f · Cleanup %.1f", metrics.asrNeurons + metrics.polishNeurons, metrics.asrNeurons, metrics.polishNeurons)).font(.caption).foregroundStyle(.secondary)
-                            Text("WoVoice estimates in USD, not a Cloudflare invoice.").font(.caption).foregroundStyle(.secondary)
+                            Text("LiVoice estimates in USD, not a Cloudflare invoice.").font(.caption).foregroundStyle(.secondary)
                         }
                     }.font(.subheadline).card()
                 }
                 Text("English (India) · Up to 60 seconds per dictation").font(.caption).foregroundStyle(.secondary)
             }.padding(24).frame(maxWidth: 720, alignment: .leading).frame(maxWidth: .infinity)
-        }.navigationTitle("WoVoice").toolbar {
+        }.navigationTitle("LiVoice").toolbar {
             if model.owner != nil { Button { Task { await model.refreshProfile(); await model.sync() } } label: { if model.syncing || model.refreshingProfile { ProgressView() } else { Image(systemName: "arrow.triangle.2.circlepath") } }.disabled(model.syncing || model.refreshingProfile).accessibilityLabel("Refresh account and sync") }
         }
     }
@@ -136,8 +136,8 @@ struct HomeView: View {
     private var keyboardSetup: some View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Speak in other apps", systemImage: "keyboard").font(.headline)
-            Text("Add WoVoice in Settings → General → Keyboard → Keyboards, then allow Full Access so the keyboard can communicate with this app.").font(.subheadline).foregroundStyle(.secondary)
-            Text("Start a five-minute keyboard session here, return to your app, then use the globe key to choose WoVoice. Tap its microphone to start and stop dictating.").font(.subheadline).foregroundStyle(.secondary)
+            Text("Add LiVoice in Settings → General → Keyboard → Keyboards, then allow Full Access so the keyboard can communicate with this app.").font(.subheadline).foregroundStyle(.secondary)
+            Text("Start a five-minute keyboard session here, return to your app, then use the globe key to choose LiVoice. Tap its microphone to start and stop dictating.").font(.subheadline).foregroundStyle(.secondary)
             Text("During the session the microphone stays active. Audio between dictations is discarded. You can stop the session at any time; iOS’s microphone indicator remains visible.").font(.caption).foregroundStyle(.secondary)
             Button(model.keyboardSessionActive ? "Stop keyboard session" : "Start keyboard session") {
                 if model.keyboardSessionActive { model.stopSession() } else { Task { await model.startSession() } }
@@ -193,7 +193,7 @@ struct DictionaryView: View {
                     TextField("A name, word, or phrase", text: $term).font(.body).textInputAutocapitalization(.never).autocorrectionDisabled().frame(minHeight: 44)
                     Button("Add") { model.addTerm(term); term = "" }.frame(minHeight: 44).disabled(term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.owner == nil)
                 }
-            } footer: { Text("Confirmed vocabulary helps WoVoice recognize names and words you use. Up to 100 terms are included with each dictation.") }
+            } footer: { Text("Confirmed vocabulary helps LiVoice recognize names and words you use. Up to 100 terms are included with each dictation.") }
             Section("Your vocabulary") {
                 ForEach(entries) { entry in
                     entryLayout {
@@ -298,10 +298,10 @@ struct SettingsView: View {
             .confirmationDialog("Allow nearby editor text?", isPresented: $nearbyConsent, titleVisibility: .visible) {
                 Button("Allow nearby text") { model.preferences.level = .nearby; model.savePreferences() }
                 Button("Cancel", role: .cancel) { }
-            } message: { Text("For each dictation, WoVoice may send up to 512 characters before and 128 after your cursor to improve grammar and tone. This text is temporary and is never saved in History or cloud sync. You can turn it off at any time.") }
+            } message: { Text("For each dictation, LiVoice may send up to 512 characters before and 128 after your cursor to improve grammar and tone. This text is temporary and is never saved in History or cloud sync. You can turn it off at any time.") }
             .confirmationDialog("Turn off history sync?", isPresented: $historyOff, titleVisibility: .visible) { Button("Delete cloud history and turn off", role: .destructive) { Task { await model.updateCloud(history: false, retention: model.cloudSettings.historyRetentionDays) } } } message: { Text("Cloud history will be deleted. Your local copies remain.") }
-            .confirmationDialog("Delete your WoVoice account?", isPresented: $deleting, titleVisibility: .visible) { Button("Verify email and delete", role: .destructive) { Task { await model.deleteAccount() } } } message: { Text("This permanently deletes your account and its cloud data. You will verify your email again first.") }
-            .confirmationDialog("Sign out of WoVoice?", isPresented: $signingOut, titleVisibility: .visible) { Button("Sign out", role: .destructive) { Task { await model.logout() } } } message: { Text("Voice input and sync will stop. Your local history and vocabulary remain on this device.") }
+            .confirmationDialog("Delete your LiVoice account?", isPresented: $deleting, titleVisibility: .visible) { Button("Verify email and delete", role: .destructive) { Task { await model.deleteAccount() } } } message: { Text("This permanently deletes your account and its cloud data. You will verify your email again first.") }
+            .confirmationDialog("Sign out of LiVoice?", isPresented: $signingOut, titleVisibility: .visible) { Button("Sign out", role: .destructive) { Task { await model.logout() } } } message: { Text("Voice input and sync will stop. Your local history and vocabulary remain on this device.") }
             .confirmationDialog("Reset analytics on all synced devices?", isPresented: $resetAnalytics, titleVisibility: .visible) { Button("Reset analytics", role: .destructive) { model.clear(.analytics) } }
             .confirmationDialog("Clear all local data and sign out?", isPresented: $clearLocal, titleVisibility: .visible) { Button("Clear local data", role: .destructive) { Task { await model.clearLocalData() } } } message: { Text("Removes this device’s history, vocabulary, analytics, settings, and secure sign-in. Your cloud data remains.") }
     }

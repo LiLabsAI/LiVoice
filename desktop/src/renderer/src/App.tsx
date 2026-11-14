@@ -174,8 +174,15 @@ function Dashboard(): React.JSX.Element {
     <div className="shell">
       <header className="topbar">
         <div className="brand">
-          <div className="brand-mark" />
-          WoVoice
+          <svg viewBox="0 0 108 108" width="24" height="24" aria-hidden="true">
+            <rect width="108" height="108" rx="24" fill="#1A1B22" stroke="#2D2F3A" strokeWidth="2" />
+            <path d="M 33.5,39.5 V 65.5 A 7.5,7.5 0 0 0 41,73 H 46" fill="none" stroke="#7DE4B6" strokeWidth="8.4" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="58.5" cy="41.5" r="4.6" fill="#AFA4FF" />
+            <path d="M 58.5,53.5 V 73" fill="none" stroke="#7DE4B6" strokeWidth="8.2" strokeLinecap="round" />
+            <path d="M 60.79,30.74 A 11,11 0 0 1 69.47,42.27" fill="none" stroke="#AFA4FF" strokeWidth="4.8" strokeLinecap="round" />
+            <path d="M 65.06,25.27 A 17.5,17.5 0 0 1 75.99,42.11" fill="none" stroke="#7DE4B6" strokeOpacity="0.92" strokeWidth="4.3" strokeLinecap="round" />
+          </svg>
+          LiVoice
         </div>
         <nav className="tabs">
           {(
@@ -200,7 +207,7 @@ function Dashboard(): React.JSX.Element {
           <div className="card undo">
             <span>
               Sync no longer needs a recovery key: your history and dictionary are stored encrypted
-              in your WoVoice account.
+              in your LiVoice account.
             </span>
             <button
               className="action secondary"
@@ -226,7 +233,7 @@ function Dashboard(): React.JSX.Element {
           <>
             <div className="hero">
               <h1>Account</h1>
-              <p>Your WoVoice session lives in this Mac&apos;s Keychain.</p>
+              <p>Your LiVoice session lives in this Mac&apos;s Keychain.</p>
             </div>
             <div className="card">
               {auth.signedIn ? (
@@ -284,7 +291,7 @@ function Dashboard(): React.JSX.Element {
             </div>
             <div className="card">
               <h2>Automatic context</h2>
-              <p className="hint">WoVoice detects the writing situation when you start speaking. You do not need to select chat, email, or a recipient each time. Unknown situations keep your natural tone.</p>
+              <p className="hint">LiVoice detects the writing situation when you start speaking. You do not need to select chat, email, or a recipient each time. Unknown situations keep your natural tone.</p>
               <div className="stat-row"><label htmlFor="context-level">Context access</label>
                 <select id="context-level" className="select" value={settings?.contextLevel ?? 'off'} onChange={async (event) => {
                   if (!settings) return
@@ -300,8 +307,8 @@ function Dashboard(): React.JSX.Element {
               {contextConsent && <div className="card" role="region" aria-label="Context access consent">
                 <h3>{contextConsent.level === 'nearby' ? 'Allow nearby text?' : 'Allow app and field context?'}</h3>
                 <p className="hint">{contextConsent.level === 'nearby'
-                  ? 'When you start dictation, up to 512 characters before and 128 after the selection may be sent to WoVoice’s Cloudflare service with your recording to guide grammar and tone. These snippets are used for that request only and are not saved in history, sync, or logs. Full conversations and contacts are not read.'
-                  : 'When you start dictation, WoVoice detects the app and field locally and sends only a writing-task category, such as chat or email. App names, field labels, and existing text are not sent.'} You can turn this off at any time.</p>
+                  ? 'When you start dictation, up to 512 characters before and 128 after the selection may be sent to LiVoice’s Cloudflare service with your recording to guide grammar and tone. These snippets are used for that request only and are not saved in history, sync, or logs. Full conversations and contacts are not read.'
+                  : 'When you start dictation, LiVoice detects the app and field locally and sends only a writing-task category, such as chat or email. App names, field labels, and existing text are not sent.'} You can turn this off at any time.</p>
                 <div className="history-actions">
                   <button className="action secondary" onClick={() => setContextConsent(null)}>Cancel</button>
                   <button className="action" onClick={async () => {
@@ -371,7 +378,7 @@ function Dashboard(): React.JSX.Element {
               <p className="hint">
                 Microphone access records your voice when you start dictation. Accessibility
                 supports the trigger key, checks the insertion target, and reads optional focused-editor
-                context when you enable it above. WoVoice does not capture screen images, files, or browsing history.
+                context when you enable it above. LiVoice does not capture screen images, files, or browsing history.
               </p>
               <div className="stat-row">
                 <span className="label">
@@ -380,7 +387,7 @@ function Dashboard(): React.JSX.Element {
                 <span className="value">{permissions === null ? 'checking…' : permissions.mic}</span>
               </div>
               <p className="hint">
-                Audio is captured only while the bubble is recording, sent to your WoVoice
+                Audio is captured only while the bubble is recording, sent to your LiVoice
                 service for transcription, then discarded. It is never stored on the server.
               </p>
               <p>
@@ -399,7 +406,7 @@ function Dashboard(): React.JSX.Element {
               </div>
               <p className="hint">
                 This is the Accessibility permission (System Settings → Privacy &amp; Security →
-                Device Control &amp; Data Access). It lets WoVoice watch for your chosen trigger
+                Device Control &amp; Data Access). It lets LiVoice watch for your chosen trigger
                 key in any app and paste the finished text at your cursor. The focused editor is
                 checked locally to prevent insertion into a changed field. Optional context access
                 controls what editor information can accompany a recording.
@@ -419,12 +426,12 @@ function Dashboard(): React.JSX.Element {
                 <span className="label">Input Monitoring</span>
                 <span className="value">not needed</span>
               </div>
-              <p className="hint">WoVoice deliberately avoids this permission entirely.</p>
+              <p className="hint">LiVoice deliberately avoids this permission entirely.</p>
             </div>
             <div className="card">
               <h2>Startup</h2>
               <div className="stat-row">
-                <span className="label">Launch WoVoice at login</span>
+                <span className="label">Launch LiVoice at login</span>
                 <button
                   className={`action ${loginItem ? '' : 'secondary'}`}
                   onClick={() => {
@@ -439,7 +446,7 @@ function Dashboard(): React.JSX.Element {
             <div className="card">
               <h2>About</h2>
               <div className="stat-row">
-                <span className="label">WoVoice</span>
+                <span className="label">LiVoice</span>
                 <span className="value">{version}</span>
               </div>
               <div className="stat-row">
@@ -667,7 +674,7 @@ function DictionaryTab(): React.JSX.Element {
     <>
       <div className="hero">
         <h1>Dictionary</h1>
-        <p>Names and terms WoVoice should recognize in dictation.</p>
+        <p>Names and terms LiVoice should recognize in dictation.</p>
       </div>
       <div className="card">
         <div className="add-row">
@@ -802,7 +809,7 @@ function SyncCard({ signedIn }: { signedIn: boolean }): React.JSX.Element {
     <div className="card">
       <h2>Cloud sync</h2>
       <p>
-        History and dictionary sync through your WoVoice account, encrypted on WoVoice&apos;s
+        History and dictionary sync through your LiVoice account, encrypted on LiVoice&apos;s
         servers. Signing in on another device is all it takes.
       </p>
       <div className="stat-row">

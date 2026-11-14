@@ -74,7 +74,7 @@ export async function requireActiveAccount(env: AppEnv, principal: Principal): P
       403,
       "ACCOUNT_SUSPENDED",
       false,
-      current.publicStatusMessage || "This WoVoice account is temporarily suspended.",
+      current.publicStatusMessage || "This LiVoice account is temporarily suspended.",
       current.suspendedUntil ? Math.max(1, Math.ceil((current.suspendedUntil - Date.now()) / 1_000)) : undefined,
     );
   }
@@ -83,7 +83,7 @@ export async function requireActiveAccount(env: AppEnv, principal: Principal): P
       403,
       "ACCOUNT_BANNED",
       false,
-      current.publicStatusMessage || "This WoVoice account is not permitted to use cloud services.",
+      current.publicStatusMessage || "This LiVoice account is not permitted to use cloud services.",
     );
   }
   return current;
@@ -148,7 +148,7 @@ export async function restoreExpiredAccount(env: AppEnv, userId: string, now = D
       `INSERT INTO moderation_notifications
         (id, user_id, action, public_message, effective_until, status, attempts,
          next_attempt_at, created_at, updated_at)
-       VALUES(?, ?, 'active', 'Your WoVoice account access has been restored.', NULL, 'pending', 0, ?, ?, ?)`,
+       VALUES(?, ?, 'active', 'Your LiVoice account access has been restored.', NULL, 'pending', 0, ?, ?, ?)`,
     ).bind(notificationId, userId, now, now, now),
   ]);
   await recordActivity(env, { userId, type: "account_restored", requestId, statusCode: 200, createdAt: now });

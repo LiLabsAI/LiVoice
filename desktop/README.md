@@ -1,7 +1,7 @@
-# WoVoice for macOS
+# LiVoice for macOS
 
-Hold a key anywhere on your Mac, speak, and release: WoVoice transcribes the
-recording with the WoVoice Worker and pastes the text at your cursor. It uses the
+Hold a key anywhere on your Mac, speak, and release: LiVoice transcribes the
+recording with the LiVoice Worker and pastes the text at your cursor. It uses the
 same account, daily quota, and encrypted cloud sync as the Android keyboard.
 
 ## How it fits together
@@ -17,7 +17,7 @@ same account, daily quota, and encrypted cloud sync as the Android keyboard.
 - **Session:** the refresh token is sealed with the macOS Keychain (Electron
   `safeStorage`). A refresh token the server rejects signs the app out.
 - **Local data:** Node's built-in SQLite at
-  `~/Library/Application Support/WoVoice/wovoice-desktop.db`. Signing in to a
+  `~/Library/Application Support/LiVoice/wovoice-desktop.db`. Signing in to a
   different account asks before removing the previous account's local data.
 - **Cloud sync:** `src/main/sync.ts` mirrors the phone's `SyncCoordinator`
   (history and dictionary; analytics stay on the phone). Records sync through
@@ -28,9 +28,9 @@ same account, daily quota, and encrypted cloud sync as the Android keyboard.
 
 ## Permissions
 
-WoVoice needs **Microphone** access and **Accessibility** (System Settings →
+LiVoice needs **Microphone** access and **Accessibility** (System Settings →
 Privacy & Security). Accessibility lets the helper watch the trigger key and lets
-WoVoice paste. The first paste also asks to control **System Events**, which
+LiVoice paste. The first paste also asks to control **System Events**, which
 sends the ⌘V keystroke. Input Monitoring is not used.
 
 ## Development
@@ -52,7 +52,7 @@ npm run build:native
 ## Building the DMG
 
 ```bash
-npm run build:mac    # builds native/tapd, bundles, and writes dist/wovoice-desktop-<version>.dmg
+npm run build:mac    # builds native/tapd, bundles, and writes dist/livoice-desktop-<version>.dmg
 ```
 
 `electron-builder.yml` signs with the maintainer's Apple Development identity, so

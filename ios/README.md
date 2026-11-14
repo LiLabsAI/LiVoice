@@ -1,4 +1,4 @@
-# WoVoice for iOS
+# LiVoice for iOS
 
 Native SwiftUI iPhone/iPad application and UIKit keyboard extension. Swift 6 data-race checking is enabled. The local `WoVoiceCore` package implements the existing Cloudflare API, context/text/audio policies, and account-partitioned SQLite storage. No third-party runtime dependencies.
 
@@ -37,11 +37,11 @@ For a physical device select your own Apple development team for all targets, pr
 ## Dictation in other apps
 
 1. Sign in through the secure system authentication window. Production includes the fixed `platform=ios` callback as of November 5, 2026. Close any older failed sign-in window and start again with a fresh email code. A separately hosted backend also needs this callback.
-2. In iOS Settings → General → Keyboard → Keyboards, add WoVoice and allow Full Access. Offline typing and the globe key work without Full Access.
-3. In WoVoice, start a five-minute keyboard session. The microphone remains active for the duration, and audio between dictations is discarded in memory.
-4. Return to the desired app, choose WoVoice with the globe key, and tap Speak/Finish. The extension inserts only if the original document, cursor context and selection still match. It checks the host response before showing Inserted. If insertion cannot be confirmed, check the field or copy the result from WoVoice.
-5. For a system shortcut, create one in Apple Shortcuts and add WoVoice → **Start WoVoice keyboard session**. The direct action works on the tested iOS 26.5 simulator; the automatic tile also works on iOS 27.2. Its older-runtime provider-lookup failure is isolated in [a minimal diagnostic](diagnostics/shortcut-provider/README.md).
-6. Stop the session in WoVoice, use **Open to stop** in its Dynamic Island/Lock Screen activity, or let it expire. The activity link opens WoVoice to release the microphone; a locked phone may require unlocking. Audio interruptions and force-quit end it. Expired or unavailable sessions show setup guidance.
+2. In iOS Settings → General → Keyboard → Keyboards, add LiVoice and allow Full Access. Offline typing and the globe key work without Full Access.
+3. In LiVoice, start a five-minute keyboard session. The microphone remains active for the duration, and audio between dictations is discarded in memory.
+4. Return to the desired app, choose LiVoice with the globe key, and tap Speak/Finish. The extension inserts only if the original document, cursor context and selection still match. It checks the host response before showing Inserted. If insertion cannot be confirmed, check the field or copy the result from LiVoice.
+5. For a system shortcut, create one in Apple Shortcuts and add LiVoice → **Start LiVoice keyboard session**. The direct action works on the tested iOS 26.5 simulator; the automatic tile also works on iOS 27.2. Its older-runtime provider-lookup failure is isolated in [a minimal diagnostic](diagnostics/shortcut-provider/README.md).
+6. Stop the session in LiVoice, use **Open to stop** in its Dynamic Island/Lock Screen activity, or let it expire. The activity link opens LiVoice to release the microphone; a locked phone may require unlocking. Audio interruptions and force-quit end it. Expired or unavailable sessions show setup guidance.
 
 Voice and typing modes include the field's Return action (for example, Send, Search, Next or Done). The receiving app decides what that action does. A multiline editor receives a newline. Return is disabled during dictation/insertion checks and when an empty field requests it.
 

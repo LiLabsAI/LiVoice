@@ -1,5 +1,5 @@
 /*
- * tapd — WoVoice's global trigger tap for macOS.
+ * tapd — LiVoice's global trigger tap for macOS.
  *
  * A tiny event-tap daemon spawned by the Electron main process. It reports
  * trigger events as lines on stdout ("k <keycode> <0|1>", "m <button> <0|1>")

@@ -1,4 +1,4 @@
-# WoVoice Proprietary Source-Available License
+# LiVoice Proprietary Source-Available License
 
 Copyright (c) 2026 Ali Ahad. All rights reserved.
 
@@ -20,7 +20,7 @@ Any use beyond viewing and personal evaluation requires prior written
 permission from the copyright holder. Commercial licenses and other permissions
 may be available by separate written agreement.
 
-This license applies only to original WoVoice materials owned by the copyright
+This license applies only to original LiVoice materials owned by the copyright
 holder. Third-party libraries, tools, fonts, and other dependencies remain
 subject to their respective licenses and notices.
 

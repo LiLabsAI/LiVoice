@@ -21,7 +21,7 @@ export const BrandScene: React.FC = () => {
         }}
       >
         <Img
-          src={staticFile('assets/wovoice-logo.svg')}
+          src={staticFile('assets/livoice-logo.svg')}
           style={{
             width: 190,
             height: 190,
@@ -57,7 +57,7 @@ export const BrandScene: React.FC = () => {
             })}px`,
           }}
         >
-          Wo<span style={{color: colors.mint}}>Voice</span>
+          Li<span style={{color: colors.mint}}>Voice</span>
         </div>
         <div
           style={{

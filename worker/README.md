@@ -1,6 +1,6 @@
-# WoVoice transcription Worker
+# LiVoice transcription Worker
 
-This Worker is the public account, cloud-sync, and inference boundary for WoVoice.
+This Worker is the public account, cloud-sync, and inference boundary for LiVoice.
 It serves the website and passwordless authentication flow, stores account/quota data
 and cloud-sync records (encrypted by the Worker) in D1, sends verification and moderation messages
 through Cloudflare Email Service, validates Turnstile, and sends temporary WAV audio
@@ -50,7 +50,7 @@ their sign-in session. Records arrive as plain JSON over TLS; before a record re
 D1 the Worker seals it with AES-GCM under the account's own data key, bound to the
 account, record type, and record id. Each data key is stored wrapped by `SYNC_KEK`
 (envelope encryption), so a D1 export, backup, or console session holds only
-ciphertext. The WoVoice service can decrypt records to deliver them; the admin
+ciphertext. The LiVoice service can decrypt records to deliver them; the admin
 console only ever shows record counts and sizes.
 
 - `GET /v2/sync?cursor=` pages the change feed (one row per record at its latest write)

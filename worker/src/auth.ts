@@ -108,11 +108,11 @@ export const productionAuthServices: AuthServices = {
   },
   async sendCode(env, email, code): Promise<void> {
     await env.EMAIL.send({
-      from: { email: "login@wovoice.aliahad.com", name: "WoVoice" },
+      from: { email: "login@wovoice.aliahad.com", name: "LiVoice" },
       to: email,
-      subject: `${code} is your WoVoice verification code`,
-      text: `Your WoVoice verification code is ${code}. It expires in 10 minutes. If you did not request this code, you can ignore this email.`,
-      html: `<div style="font-family:system-ui,sans-serif;max-width:520px;margin:auto;padding:28px;color:#17171a"><h1 style="font-size:24px">Verify your WoVoice account</h1><p>Enter this code in the secure WoVoice sign-in page:</p><p style="font-size:34px;font-weight:750;letter-spacing:8px;margin:28px 0">${code}</p><p style="color:#666">The code expires in 10 minutes. If you did not request it, you can ignore this email.</p></div>`,
+      subject: `${code} is your LiVoice verification code`,
+      text: `Your LiVoice verification code is ${code}. It expires in 10 minutes. If you did not request this code, you can ignore this email.`,
+      html: `<div style="font-family:system-ui,sans-serif;max-width:520px;margin:auto;padding:28px;color:#17171a"><h1 style="font-size:24px">Verify your LiVoice account</h1><p>Enter this code in the secure LiVoice sign-in page:</p><p style="font-size:34px;font-weight:750;letter-spacing:8px;margin:28px 0">${code}</p><p style="color:#666">The code expires in 10 minutes. If you did not request it, you can ignore this email.</p></div>`,
     });
   },
 };
@@ -211,12 +211,12 @@ async function startAuthentication(
     ]);
   } catch (error) {
     if (error instanceof Error && error.message.includes("EMAIL_RATE_LIMITED")) {
-      throw new ApiError(503, "EMAIL_RATE_LIMITED", true, "WoVoice has reached its monthly verification limit.", 3_600);
+      throw new ApiError(503, "EMAIL_RATE_LIMITED", true, "LiVoice has reached its monthly verification limit.", 3_600);
     }
     throw error;
   }
   if ((monthly[1]?.meta.changes ?? 0) !== 1) {
-    throw new ApiError(503, "EMAIL_RATE_LIMITED", true, "WoVoice has reached its monthly verification limit.", 3_600);
+    throw new ApiError(503, "EMAIL_RATE_LIMITED", true, "LiVoice has reached its monthly verification limit.", 3_600);
   }
 
   const challengeId = crypto.randomUUID();

@@ -1,4 +1,4 @@
-// WoVoice landing page interactions. Loaded as a file because the site CSP forbids inline scripts.
+// LiVoice landing page interactions. Loaded as a file because the site CSP forbids inline scripts.
 (() => {
   document.documentElement.classList.add("js");
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;

@@ -30,7 +30,8 @@ const ADMIN_SHELL = `<!doctype html>
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#111014">
   <meta name="robots" content="noindex, nofollow, noarchive">
-  <title>WoVoice Admin</title>
+  <title>LiVoice Admin</title>
+  <link rel="icon" href="/media/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/admin/assets/admin.css">
 </head>
 <body>
@@ -98,17 +99,17 @@ export const productionAdminServices: AdminServices = {
       ? `<p><strong>Effective until:</strong> ${escapeHtml(new Date(message.effectiveUntil).toISOString())}</p>`
       : "";
     await env.EMAIL.send({
-      from: { email: "login@wovoice.aliahad.com", name: "WoVoice Accounts" },
+      from: { email: "login@wovoice.aliahad.com", name: "LiVoice Accounts" },
       to: message.to,
       replyTo: supportEmail,
-      subject: `Your WoVoice account access was ${stateLabel}`,
+      subject: `Your LiVoice account access was ${stateLabel}`,
       text: [
-        `Your WoVoice account access was ${stateLabel}.`,
+        `Your LiVoice account access was ${stateLabel}.`,
         message.effectiveUntil ? `Effective until: ${new Date(message.effectiveUntil).toISOString()}` : "",
         message.publicMessage,
         `Questions or appeals: ${supportEmail}`,
       ].filter(Boolean).join("\n\n"),
-      html: `<div style="font-family:system-ui,sans-serif;max-width:560px;margin:auto;padding:28px;color:#17171a"><h1 style="font-size:24px">WoVoice account update</h1><p>Your WoVoice account access was <strong>${escapeHtml(stateLabel)}</strong>.</p>${until}<p>${escapeHtml(message.publicMessage)}</p><p>Questions or appeals: <a href="mailto:${escapeHtml(supportEmail)}">${escapeHtml(supportEmail)}</a></p></div>`,
+      html: `<div style="font-family:system-ui,sans-serif;max-width:560px;margin:auto;padding:28px;color:#17171a"><h1 style="font-size:24px">LiVoice account update</h1><p>Your LiVoice account access was <strong>${escapeHtml(stateLabel)}</strong>.</p>${until}<p>${escapeHtml(message.publicMessage)}</p><p>Questions or appeals: <a href="mailto:${escapeHtml(supportEmail)}">${escapeHtml(supportEmail)}</a></p></div>`,
     });
   },
 };
@@ -238,7 +239,7 @@ export async function handleAdminRoute(
 
 async function authenticateAdmin(request: Request, env: AppEnv): Promise<AdminPrincipal> {
   const token = cookieValue(request, ADMIN_SESSION_COOKIE);
-  if (!token) throw new ApiError(401, "ADMIN_REQUIRED", false, "Sign in as the WoVoice administrator.");
+  if (!token) throw new ApiError(401, "ADMIN_REQUIRED", false, "Sign in as the LiVoice administrator.");
   const tokenHash = await hmac(env.AUTH_MASTER_KEY, `admin-session:${token}`);
   const row = await env.DB.prepare(
     `SELECT s.id AS session_id, s.user_id, s.csrf_hash, s.idle_expires_at, s.absolute_expires_at,
@@ -1075,13 +1076,13 @@ function periodStart(value: string): { startMs: number; startDate: string; norma
 }
 
 function publicStatusMessage(status: AccountState, value: unknown): string {
-  if (status === "active") return "Your WoVoice account access has been restored.";
+  if (status === "active") return "Your LiVoice account access has been restored.";
   const supplied = typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]/gu, " ").trim() : "";
   if (supplied.length > 240) throw new ApiError(400, "INVALID_REQUEST", false, "The public message is too long.");
   if (supplied) return supplied;
   return status === "suspended"
-    ? "Your WoVoice cloud access is temporarily suspended. Contact support if you believe this is a mistake."
-    : "Your WoVoice cloud access has been disabled. Contact support if you believe this is a mistake.";
+    ? "Your LiVoice cloud access is temporarily suspended. Contact support if you believe this is a mistake."
+    : "Your LiVoice cloud access has been disabled. Contact support if you believe this is a mistake.";
 }
 
 function requiredText(value: unknown, min: number, max: number, message: string): string {

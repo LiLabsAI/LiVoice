@@ -15,7 +15,7 @@ public struct APIClient: Sendable {
                                                 body: Data? = nil, timeout: Double = 15, as: T.Type = T.self) async throws -> T {
         let data = try await send(path, method: method, token: token, body: body, timeout: timeout)
         do { return try JSONDecoder().decode(T.self, from: data) }
-        catch { throw APIError(code: "INVALID_RESPONSE", message: "WoVoice sent an unreadable response. Try again.", retryable: true) }
+        catch { throw APIError(code: "INVALID_RESPONSE", message: "LiVoice sent an unreadable response. Try again.", retryable: true) }
     }
     public func empty(_ path: String, method: String, token: String, body: Payload? = nil) async throws {
         _ = try await send(path, method: method, token: token, body: try body.map { try JSONEncoder().encode($0) }, timeout: 15)
@@ -36,11 +36,11 @@ public struct APIClient: Sendable {
         do { (data, response) = try await session.data(for: request) }
         catch is CancellationError { throw CancellationError() }
         catch let error as URLError where error.code == .cancelled { throw CancellationError() }
-        catch { throw APIError(code: "NETWORK_UNAVAILABLE", message: "Could not reach WoVoice. Check your connection.", retryable: true) }
+        catch { throw APIError(code: "NETWORK_UNAVAILABLE", message: "Could not reach LiVoice. Check your connection.", retryable: true) }
         guard let http = response as? HTTPURLResponse else { throw APIError(code: "INVALID_RESPONSE", message: "Invalid server response.", retryable: true) }
         guard (200..<300).contains(http.statusCode) else {
             let parsed = try? JSONDecoder().decode(ErrorBody.self, from: data)
-            throw APIError(code: parsed?.error?.code ?? "HTTP_\(http.statusCode)", message: parsed?.error?.message ?? "WoVoice request failed (\(http.statusCode)).",
+            throw APIError(code: parsed?.error?.code ?? "HTTP_\(http.statusCode)", message: parsed?.error?.message ?? "LiVoice request failed (\(http.statusCode)).",
                            retryable: parsed?.error?.retryable ?? (http.statusCode >= 500), status: http.statusCode, conflicts: parsed?.conflicts ?? [])
         }
         return data
@@ -64,7 +64,7 @@ public struct APIClient: Sendable {
         body.append(wav); append("\r\n--\(boundary)--\r\n")
         let data = try await send("/v1/transcriptions", method: "POST", token: token, body: body, timeout: 90, contentType: "multipart/form-data; boundary=\(boundary)")
         do { return try JSONDecoder().decode(Transcription.self, from: data) }
-        catch { throw APIError(code: "INVALID_RESPONSE", message: "WoVoice sent an unreadable response. Try again.", retryable: true) }
+        catch { throw APIError(code: "INVALID_RESPONSE", message: "LiVoice sent an unreadable response. Try again.", retryable: true) }
     }
     public func pull(token: String, cursor: Int) async throws -> CloudPage {
         try await request("/v2/sync?cursor=\(cursor)&limit=50", token: token, timeout: 30)

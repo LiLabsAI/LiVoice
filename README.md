@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/images/wovoice-logo.svg" width="120" alt="WoVoice app icon">
+  <img src="docs/images/livoice-logo.svg" width="120" alt="LiVoice app icon">
 </p>
 
-<h1 align="center">WoVoice</h1>
+<h1 align="center">LiVoice</h1>
 
 <p align="center">
   <strong>Speak naturally. Get clear, ready-to-use text.</strong><br>
@@ -10,40 +10,40 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/aliahadmd/wovoice/releases"><strong>Download WoVoice</strong></a>
+  <a href="https://github.com/LiLabsAI/LiVoice/releases"><strong>Download LiVoice</strong></a>
   ·
   <a href="https://wovoice.aliahad.com/status"><strong>Service status</strong></a>
   ·
   <a href="https://wovoice.aliahad.com/privacy"><strong>Privacy</strong></a>
 </p>
 
-WoVoice turns your speech into clean, punctuated text and puts it exactly where you were typing — in a chat, an email, a note, a browser, or any other app.
+LiVoice turns your speech into clean, punctuated text and puts it exactly where you were typing — in a chat, an email, a note, a browser, or any other app.
 
-- **On Android**, WoVoice is a keyboard. Tap the microphone, speak, tap again, and the text appears in the field you were using.
-- **On Mac**, WoVoice runs in the background. Hold the **⌥ Option** key anywhere, speak, let go, and the text is typed at your cursor.
+- **On Android**, LiVoice is a keyboard. Tap the microphone, speak, tap again, and the text appears in the field you were using.
+- **On Mac**, LiVoice runs in the background. Hold the **⌥ Option** key anywhere, speak, let go, and the text is typed at your cursor.
 
 Both use the same free account, so your History and Dictionary follow you from phone to Mac automatically.
 
-WoVoice is tuned for **English (India)**, with special care for South Asian pronunciation, names, numbers, and everyday sentences. It is a free public beta, distributed directly from this page rather than the Play Store or App Store.
+LiVoice is tuned for **English (India)**, with special care for South Asian pronunciation, names, numbers, and everyday sentences. It is a free public beta, distributed directly from this page rather than the Play Store or App Store.
 
 <p align="center">
-  <img src="docs/images/wovoice-home.png" width="300" alt="WoVoice Home screen on Android">
+  <img src="docs/images/wovoice-home.png" width="300" alt="LiVoice Home screen on Android">
   &nbsp;&nbsp;
-  <img src="docs/images/mac-home.png" width="520" alt="WoVoice Home screen on Mac">
+  <img src="docs/images/mac-home.png" width="520" alt="LiVoice Home screen on Mac">
 </p>
 
 
 ## Automatic context
 
-Enable **Automatic context** once in Settings to let WoVoice automatically adapt to the app and text field. You do not need to choose a situation while dictating. App-only access sends a writing-task category; separately enabling **Nearby text** allows a small cursor snippet to guide grammar and tone. Unknown audiences keep your natural voice. Context is not saved in history or sync. See the [feature guide](docs/features/automatic-context.md) for behavior and limits.
+Enable **Automatic context** once in Settings to let LiVoice automatically adapt to the app and text field. You do not need to choose a situation while dictating. App-only access sends a writing-task category; separately enabling **Nearby text** allows a small cursor snippet to guide grammar and tone. Unknown audiences keep your natural voice. Context is not saved in history or sync. See the [feature guide](docs/features/automatic-context.md) for behavior and limits.
 
 ## Contents
 
-- [What WoVoice does for you](#what-wovoice-does-for-you)
+- [What LiVoice does for you](#what-livoice-does-for-you)
 - [Product video](#product-video)
-- [Your WoVoice account](#your-wovoice-account)
-- [WoVoice on Android](#wovoice-on-android)
-- [WoVoice on Mac](#wovoice-on-mac)
+- [Your LiVoice account](#your-livoice-account)
+- [LiVoice on Android](#livoice-on-android)
+- [LiVoice on Mac](#livoice-on-mac)
 - [Sync between your devices](#sync-between-your-devices)
 - [Tips for the best accuracy](#tips-for-the-best-accuracy)
 - [Your privacy](#your-privacy)
@@ -51,7 +51,7 @@ Enable **Automatic context** once in Settings to let WoVoice automatically adapt
 - [Troubleshooting](#troubleshooting)
 - [Current limits](#current-limits)
 
-## What WoVoice does for you
+## What LiVoice does for you
 
 - **Writes what you meant.** Punctuation, capital letters, and spacing are added for you. You don't need to say "comma" or "full stop".
 - **Cleans up lightly, never rewrites.** Filler words like "um" are removed and obvious grammar slips are fixed. Your names, numbers, and meaning stay exactly as you said them.
@@ -66,17 +66,17 @@ Enable **Automatic context** once in Settings to let WoVoice automatically adapt
 
 <p align="center">
   <a href="docs/portfolio/wovoice-marketing-video.mp4">
-    <img src="docs/portfolio/wovoice-marketing-cover.png" width="720" alt="Watch the WoVoice product video">
+    <img src="docs/portfolio/wovoice-marketing-cover.png" width="720" alt="Watch the LiVoice product video">
   </a>
 </p>
 
-## Your WoVoice account
+## Your LiVoice account
 
-Voice dictation needs a free WoVoice account. There is no password: you sign in with a six-digit code sent to your email.
+Voice dictation needs a free LiVoice account. There is no password: you sign in with a six-digit code sent to your email.
 
 1. In the app, tap or click **Sign in or create account**.
-2. A secure WoVoice page opens in your browser. Enter your email address and complete the quick security check.
-3. Open the email from WoVoice and enter the six-digit code.
+2. A secure LiVoice page opens in your browser. Enter your email address and complete the quick security check.
+3. Open the email from LiVoice and enter the six-digit code.
 4. You're returned to the app, signed in.
 
 Use the same email on your phone and your Mac and they share one History and one Dictionary.
@@ -85,42 +85,42 @@ Every account includes **10 minutes of dictation per day**. The allowance resets
 
 ---
 
-## WoVoice on Android
+## LiVoice on Android
 
 Works on Android 7.0 and later.
 
 ### Install
 
-1. On your phone, open the [Releases page](https://github.com/aliahadmd/wovoice/releases) and download the newest **WoVoice `.apk`** file.
+1. On your phone, open the [Releases page](https://github.com/LiLabsAI/LiVoice/releases) and download the newest **LiVoice `.apk`** file.
 2. Open the downloaded file. If Android asks, allow your browser to **install unknown apps**, then tap **Install**.
 
 ### Set up (about one minute)
 
-Open WoVoice and go to **Settings → Setup**.
+Open LiVoice and go to **Settings → Setup**.
 
 1. Tap **Allow** next to Microphone and approve microphone access.
-2. Tap **Enable** next to Keyboard access, and turn on **WoVoice** in Android's keyboard list.
-3. Return to the app and tap **Choose**, then select **WoVoice** as your keyboard.
+2. Tap **Enable** next to Keyboard access, and turn on **LiVoice** in Android's keyboard list.
+3. Return to the app and tap **Choose**, then select **LiVoice** as your keyboard.
 4. Under **Account**, tap **Sign in or create account** and follow the steps above.
 
-Android shows a standard warning when you turn on any downloaded keyboard. Check that the name says **WoVoice**, then accept.
+Android shows a standard warning when you turn on any downloaded keyboard. Check that the name says **LiVoice**, then accept.
 
-When everything is ready, the Home screen shows **Microphone ready**, **WoVoice selected**, **Account ready**, and **Network available**.
+When everything is ready, the Home screen shows **Microphone ready**, **LiVoice selected**, **Account ready**, and **Network available**.
 
 > Voice typing needs an internet connection and a signed-in account. The regular keyboard always works, even offline.
 
 ### Dictate
 
-**1. Open any text box.** Tap a text field in Messages, WhatsApp, Gmail, Notes, a browser, or any other app. WoVoice appears ready to listen.
+**1. Open any text box.** Tap a text field in Messages, WhatsApp, Gmail, Notes, a browser, or any other app. LiVoice appears ready to listen.
 
 <p align="center">
-  <img src="docs/images/keyboard-voice-idle.png" width="620" alt="WoVoice keyboard ready to record">
+  <img src="docs/images/keyboard-voice-idle.png" width="620" alt="LiVoice keyboard ready to record">
 </p>
 
 **2. Tap the big microphone and speak.** The waveform moves as you talk.
 
 <p align="center">
-  <img src="docs/images/keyboard-recording.png" width="300" alt="WoVoice recording your voice">
+  <img src="docs/images/keyboard-recording.png" width="300" alt="LiVoice recording your voice">
 </p>
 
 - Speak normally in full sentences, not one word at a time.
@@ -128,9 +128,9 @@ When everything is ready, the Home screen shows **Microphone ready**, **WoVoice 
 - Tap **×** to cancel. Cancelled speech is thrown away.
 - Recording stops on its own after 60 seconds.
 
-**3. Wait a moment.** WoVoice listens to your whole thought first so the punctuation makes sense, then inserts the finished text in one go.
+**3. Wait a moment.** LiVoice listens to your whole thought first so the punctuation makes sense, then inserts the finished text in one go.
 
-Stay in the same text box while it's working. If you switch to another box or app, WoVoice deliberately drops the result rather than typing into the wrong place.
+Stay in the same text box while it's working. If you switch to another box or app, LiVoice deliberately drops the result rather than typing into the wrong place.
 
 Some examples:
 
@@ -153,22 +153,22 @@ Some examples:
 | **Done / Enter / Next / Search / Send / Go** | Does whatever the app expects — sends the message, runs the search, moves to the next field, and so on. |
 | **Swipe left or right** | Another way to switch between voice and the regular keyboard. |
 
-**Passwords and PINs are protected.** In password fields WoVoice switches to the regular keyboard and turns the microphone off, so secrets are never spoken or sent anywhere.
+**Passwords and PINs are protected.** In password fields LiVoice switches to the regular keyboard and turns the microphone off, so secrets are never spoken or sent anywhere.
 
 ### Speak while using another keyboard
 
 Keep Gboard or your preferred keyboard selected:
 
-1. Open **WoVoice → Settings → Dictation bubble** and turn on **Speak without switching keyboard**.
-2. Allow the microphone and enable **WoVoice dictation bubble** in Android Accessibility settings.
-3. Sign in to WoVoice, then select a text box in an app. A small bubble appears above your keyboard.
-4. Tap the microphone bubble, speak, then tap again to finish. WoVoice inserts at the original cursor or replaces the selected text.
+1. Open **LiVoice → Settings → Dictation bubble** and turn on **Speak without switching keyboard**.
+2. Allow the microphone and enable **LiVoice dictation bubble** in Android Accessibility settings.
+3. Sign in to LiVoice, then select a text box in an app. A small bubble appears above your keyboard.
+4. Tap the microphone bubble, speak, then tap again to finish. LiVoice inserts at the original cursor or replaces the selected text.
 
-Drag the bubble to move it. **×** cancels an active dictation; when idle, **×** hides the bubble until you enable it again in Settings. The bubble stays hidden in password fields and while the WoVoice keyboard is selected. Changing fields, editing text, switching apps, or locking the phone cancels a pending dictation.
+Drag the bubble to move it. **×** cancels an active dictation; when idle, **×** hides the bubble until you enable it again in Settings. The bubble stays hidden in password fields and while the LiVoice keyboard is selected. Changing fields, editing text, switching apps, or locking the phone cancels a pending dictation.
 
-If Android shows Accessibility enabled but the bubble is unavailable after an app restart or update, turn **WoVoice dictation bubble** off and on once in Android Accessibility settings.
+If Android shows Accessibility enabled but the bubble is unavailable after an app restart or update, turn **LiVoice dictation bubble** off and on once in Android Accessibility settings.
 
-**Keep the bubble available in the background.** Open **Settings → Dictation bubble → Keep the bubble available → Configure**. On Xiaomi, Redmi, and POCO phones, enable **Autostart** in WoVoice’s App info and choose **Power → No restrictions**. Lock the WoVoice card in Recents to protect it from **Clear all**. Some phone versions treat swiping away an app as a force-stop and can remove its Accessibility access. Use Home or Back to close its screen. If access is removed, reopen WoVoice and tap **Reconnect**. The status distinguishes a connected service from access that is enabled but disconnected.
+**Keep the bubble available in the background.** Open **Settings → Dictation bubble → Keep the bubble available → Configure**. On Xiaomi, Redmi, and POCO phones, enable **Autostart** in LiVoice’s App info and choose **Power → No restrictions**. Lock the LiVoice card in Recents to protect it from **Clear all**. Some phone versions treat swiping away an app as a force-stop and can remove its Accessibility access. Use Home or Back to close its screen. If access is removed, reopen LiVoice and tap **Reconnect**. The status distinguishes a connected service from access that is enabled but disconnected.
 
 On Android 13 and newer, the bubble uses Android’s Accessibility input connection to insert into the selection, preserving the editor’s surrounding rich text and HTML. Native editors on older versions retain the formatting exposed through Accessibility. HTML editors without a usable input connection offer **Choose keyboard** instead of replacing their whole document. If an editor does not confirm a submitted edit, the bubble says **Sent to editor** and asks you to check the text; it never submits the same text through another method automatically.
 
@@ -215,62 +215,62 @@ Tap **EN** or swipe sideways to type by hand. It works offline and has no accoun
 
 The regular keyboard is intentionally simple. It doesn't have autocorrect or word suggestions.
 
-### The WoVoice app
+### The LiVoice app
 
 The app has four tabs at the bottom: **Home**, **History**, **Dictionary**, and **Settings**.
 
-**Home** shows how you're doing for **Today**, **7 days**, **30 days**, or **All time**: number of dictations, time spent speaking, words, speaking pace, how quickly results came back, and your most recent dictations. Only dictations that were actually typed into an app are counted. It also shows a rough estimate of the AI processing cost of your dictations — this is for interest only; WoVoice is free and you are never charged.
+**Home** shows how you're doing for **Today**, **7 days**, **30 days**, or **All time**: number of dictations, time spent speaking, words, speaking pace, how quickly results came back, and your most recent dictations. Only dictations that were actually typed into an app are counted. It also shows a rough estimate of the AI processing cost of your dictations — this is for interest only; LiVoice is free and you are never charged.
 
 **History** lists every dictation that was inserted. Search it, copy text, open the details, or delete items (swipe to delete, with **Undo**). Your voice recordings are never kept, and History doesn't record which app you were typing in.
 
-**Dictionary** helps WoVoice spell unusual words correctly.
+**Dictionary** helps LiVoice spell unusual words correctly.
 
 <p align="center">
-  <img src="docs/images/wovoice-dictionary.png" width="340" alt="WoVoice Dictionary screen">
+  <img src="docs/images/wovoice-dictionary.png" width="340" alt="LiVoice Dictionary screen">
 </p>
 
 - Tap **+ Add** and type a name or term exactly as it should be spelled. You can keep up to 1,000 terms.
-- If you fix a word right after dictating it, WoVoice may offer it under **Suggestions**. Approve only real names or special terms you want remembered — nothing is added without your approval.
+- If you fix a word right after dictating it, LiVoice may offer it under **Suggestions**. Approve only real names or special terms you want remembered — nothing is added without your approval.
 
 **Settings** covers setup, your account and sync, voice options, keyboard feel (vibration, animations, waveform), History and statistics, Dictionary learning, and privacy controls.
 
 ---
 
-## WoVoice on Mac
+## LiVoice on Mac
 
 Hold a key, speak, release — the text appears wherever your cursor is, in any app.
 
 ### Install
 
-1. Open the [Releases page](https://github.com/aliahadmd/wovoice/releases), find the newest **WoVoice Desktop** release, and download the `wovoice-desktop-….dmg` file.
-2. Open it and drag **WoVoice** into your **Applications** folder.
-3. Open WoVoice from Applications.
+1. Open the [Releases page](https://github.com/LiLabsAI/LiVoice/releases), find the newest **LiVoice Desktop** release, and download the `livoice-desktop-….dmg` file.
+2. Open it and drag **LiVoice** into your **Applications** folder.
+3. Open LiVoice from Applications.
 
-Because WoVoice is downloaded from the web rather than the App Store, macOS may say it can't verify the app the first time. If so, open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to the WoVoice message.
+Because LiVoice is downloaded from the web rather than the App Store, macOS may say it can't verify the app the first time. If so, open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to the LiVoice message.
 
 ### Give it two permissions
 
-WoVoice asks for exactly two permissions — nothing else. It never reads your screen, files, or browsing.
+LiVoice asks for exactly two permissions — nothing else. It never reads your screen, files, or browsing.
 
 1. **Microphone** — so it can hear you while you dictate.
 2. **Device Control & Data Access** (called **Accessibility** on older macOS) — so it can notice when you press your dictation key and paste the finished text at your cursor.
 
-Both can be granted from WoVoice's **Settings** tab. The first time WoVoice pastes, macOS also asks whether WoVoice may control **System Events** — click **OK**. This is what lets it type the text for you.
+Both can be granted from LiVoice's **Settings** tab. The first time LiVoice pastes, macOS also asks whether LiVoice may control **System Events** — click **OK**. This is what lets it type the text for you.
 
 <p align="center">
-  <img src="docs/images/mac-settings.png" width="620" alt="WoVoice Settings on Mac with triggers, permissions, and startup">
+  <img src="docs/images/mac-settings.png" width="620" alt="LiVoice Settings on Mac with triggers, permissions, and startup">
 </p>
 
-Then open the **Account** tab and sign in (see [Your WoVoice account](#your-wovoice-account)).
+Then open the **Account** tab and sign in (see [Your LiVoice account](#your-livoice-account)).
 
 ### Dictate
 
 1. Click into any text box — a message, an email, a document, a search bar.
 2. **Hold ⌥ Option** and start speaking. A small bubble appears at the top of your screen with a live waveform and timer.
-3. **Let go** of the key. WoVoice transcribes your speech and types it at your cursor.
+3. **Let go** of the key. LiVoice transcribes your speech and types it at your cursor.
 
 <p align="center">
-  <img src="docs/images/mac-recording-bubble.png" width="480" alt="WoVoice recording bubble showing Listening, release Option to transcribe">
+  <img src="docs/images/mac-recording-bubble.png" width="480" alt="LiVoice recording bubble showing Listening, release Option to transcribe">
 </p>
 
 - **Hands-free:** quickly tap ⌥ Option once to keep recording without holding it. Tap it again to finish.
@@ -281,14 +281,14 @@ Then open the **Account** tab and sign in (see [Your WoVoice account](#your-wovo
 
 Your clipboard is put back the way it was after each paste, so dictating never overwrites something you copied.
 
-### The WoVoice window
+### The LiVoice window
 
 **Home** shows your dictations for today, the last 7 or 30 days, or all time — how many, how long, how many words, and your speaking pace — plus your most recent dictations.
 
 **History** lists everything you've dictated, including dictations from your phone. Search it, **Copy** any item, or **Delete** it (with Undo).
 
 <p align="center">
-  <img src="docs/images/mac-history.png" width="620" alt="WoVoice History on Mac">
+  <img src="docs/images/mac-history.png" width="620" alt="LiVoice History on Mac">
 </p>
 
 **Dictionary** lets you add and remove names and special terms. It's the same Dictionary as on your phone.
@@ -300,7 +300,7 @@ Your clipboard is put back the way it was after each paste, so dictating never o
 - Choose your **hold-to-talk key**: left ⌥ Option (default), right ⌥ Option, left or right ⌘ Command, ⇪ Caps Lock, or the 🌐 fn / Globe key. Only the key you choose starts dictation — normal typing is never affected.
 - Turn the keyboard trigger or middle-click trigger on or off.
 - Check and grant permissions.
-- Start WoVoice automatically when you log in to your Mac.
+- Start LiVoice automatically when you log in to your Mac.
 
 ---
 
@@ -330,15 +330,15 @@ Synced data is stored encrypted, with a key unique to your account.
 
 ## Your privacy
 
-WoVoice is built to collect as little as possible.
+LiVoice is built to collect as little as possible.
 
 - **Your voice is never stored.** Recordings are used only to produce your text and are deleted straight away — after success, failure, or cancellation.
 - **Only what you dictate is processed.** The text around your cursor, your clipboard, your contacts, what you type by hand, and the name of the app you're using are never sent.
 - **Passwords are safe.** Voice is turned off in password and PIN fields on Android.
 - **Your Dictionary stays yours.** Only terms you've approved are used to improve recognition.
-- **Your synced data is encrypted** with a key unique to your account. WoVoice's support staff never see the contents of your History or Dictionary.
+- **Your synced data is encrypted** with a key unique to your account. LiVoice's support staff never see the contents of your History or Dictionary.
 - **No ads, no tracking, no crash-reporting tools.**
-- Phone backups of WoVoice data are turned off, and your sign-in is protected by your device's secure storage (Android Keystore or the Mac Keychain).
+- Phone backups of LiVoice data are turned off, and your sign-in is protected by your device's secure storage (Android Keystore or the Mac Keychain).
 
 You stay in control of your data:
 
@@ -346,29 +346,29 @@ You stay in control of your data:
 | --- | --- |
 | **Clear history** | Your saved dictations. |
 | **Reset analytics** | Your Home statistics. |
-| **Clear all data** | Everything WoVoice stores on this phone. |
+| **Clear all data** | Everything LiVoice stores on this phone. |
 | **Delete account** | Your account, every synced item, and all your sign-ins. This needs a fresh email code. |
 
 Read the full [Privacy Policy](https://wovoice.aliahad.com/privacy) or learn how to [delete your account](https://wovoice.aliahad.com/delete-account).
 
-### What the WoVoice team can see
+### What the LiVoice team can see
 
-WoVoice is run from a small admin console. To be open about it, here is exactly what it shows — real screenshots, with the administrator's email blurred.
+LiVoice is run from a small admin console. To be open about it, here is exactly what it shows — real screenshots, with the administrator's email blurred.
 
 <p align="center">
-  <img src="docs/images/admin-overview.webp" width="760" alt="WoVoice admin console overview: number of users, successful dictations, minutes of voice processed, estimated AI cost, and the free service budget">
+  <img src="docs/images/admin-overview.webp" width="760" alt="LiVoice admin console overview: number of users, successful dictations, minutes of voice processed, estimated AI cost, and the free service budget">
 </p>
 
-**The Overview** shows service-wide totals: how many people use WoVoice, how many dictations succeeded or failed, how many minutes of voice were processed, how fast results came back, and how much of the free daily service budget has been used.
+**The Overview** shows service-wide totals: how many people use LiVoice, how many dictations succeeded or failed, how many minutes of voice were processed, how fast results came back, and how much of the free daily service budget has been used.
 
 <p align="center">
-  <img src="docs/images/admin-user.webp" width="760" alt="WoVoice admin console user page: account status, 90-day usage, cloud sync record counts, recent activity, and signed-in devices">
+  <img src="docs/images/admin-user.webp" width="760" alt="LiVoice admin console user page: account status, 90-day usage, cloud sync record counts, recent activity, and signed-in devices">
 </p>
 
 **A user's page** shows that account's email and status, how much dictation time it has used, how many History items are synced and their total size, which devices are signed in, and a list of recent events such as "Transcription Succeeded" with the recording's length and processing time.
 
 <p align="center">
-  <img src="docs/images/admin-audit.webp" width="760" alt="WoVoice admin console audit log listing every administrator sign-in and action">
+  <img src="docs/images/admin-audit.webp" width="760" alt="LiVoice admin console audit log listing every administrator sign-in and action">
 </p>
 
 **The Audit log** records every administrator sign-in and every action taken on an account, so access to the console is itself accountable. Activity and audit entries are deleted after 90 days.
@@ -383,34 +383,34 @@ The console is used to keep the free service running — for example, suspending
 
 | Message | Meaning |
 | --- | --- |
-| **Tap to speak** / **Listening…** | WoVoice is ready, or is recording. |
+| **Tap to speak** / **Listening…** | LiVoice is ready, or is recording. |
 | **Tap again to finish** | Recording is in progress on your phone. |
 | **Thinking** / **Transcribing** | Your speech is being turned into text. |
 | **No clear speech** | The recording was silent or too quiet. Nothing was sent. |
-| **Connection failed** | WoVoice couldn't reach its service. Check your internet. |
+| **Connection failed** | LiVoice couldn't reach its service. Check your internet. |
 | **Sign in to use voice** | You're signed out or your sign-in expired. The regular keyboard still works. |
 | **Daily limit reached** | You've used today's 10 free minutes. It resets at midnight UTC. |
 | **Try again** | Nothing was typed. Go back to the same text box and record again. |
 
 ## Troubleshooting
 
-### Android: WoVoice doesn't appear as my keyboard
+### Android: LiVoice doesn't appear as my keyboard
 
-1. Open **WoVoice → Settings → Setup**.
-2. Tap **Enable** and make sure WoVoice is switched on.
-3. Tap **Choose** and select WoVoice.
+1. Open **LiVoice → Settings → Setup**.
+2. Tap **Enable** and make sure LiVoice is switched on.
+3. Tap **Choose** and select LiVoice.
 4. Tap a text box again.
 
 ### Mac: holding Option does nothing
 
-- In WoVoice **Settings**, check that both permissions say **granted** and that **Keyboard trigger enabled** is **On**.
-- If you recently updated WoVoice, macOS may need the permission again: open the permission pane, turn WoVoice off and on, then quit and reopen WoVoice.
-- Make sure WoVoice is running — look for it in your Dock or open it from Applications.
+- In LiVoice **Settings**, check that both permissions say **granted** and that **Keyboard trigger enabled** is **On**.
+- If you recently updated LiVoice, macOS may need the permission again: open the permission pane, turn LiVoice off and on, then quit and reopen LiVoice.
+- Make sure LiVoice is running — look for it in your Dock or open it from Applications.
 
 ### Mac: the text isn't pasted
 
 - Make sure your cursor is in a text box before you start speaking.
-- If macOS asked whether WoVoice may control **System Events** and you clicked Don't Allow, turn it back on in **System Settings → Privacy & Security → Automation → WoVoice → System Events**.
+- If macOS asked whether LiVoice may control **System Events** and you clicked Don't Allow, turn it back on in **System Settings → Privacy & Security → Automation → LiVoice → System Events**.
 
 ### "No clear speech" keeps appearing
 
@@ -423,7 +423,7 @@ The console is used to keep the free service running — for example, suspending
 
 - Check your Wi-Fi or mobile data.
 - Open your account and check that your email and remaining time are shown. If your sign-in expired, sign in again.
-- Check the [WoVoice service status](https://wovoice.aliahad.com/status).
+- Check the [LiVoice service status](https://wovoice.aliahad.com/status).
 
 ### A name or word keeps coming out wrong
 
@@ -431,7 +431,7 @@ Add it to your **Dictionary** with the exact spelling you want, then dictate aga
 
 ### Text wasn't inserted on Android
 
-WoVoice won't type into a different place than where you started. Keep the same text box open until it finishes, then try again.
+LiVoice won't type into a different place than where you started. Keep the same text box open until it finishes, then try again.
 
 ### A dictation is missing from History
 
@@ -439,13 +439,13 @@ History only keeps dictations that were actually typed into an app. Cancelled, s
 
 ### The keyboard's action button says something unexpected
 
-The app you're typing in decides whether that button is Done, Enter, Next, Search, Send, or Go. WoVoice simply follows it.
+The app you're typing in decides whether that button is Done, Enter, Next, Search, Send, or Go. LiVoice simply follows it.
 
 ## Current limits
 
 - Recognition is focused on English (India).
 - Each recording can be up to 60 seconds.
-- Voice dictation needs an internet connection and a WoVoice account.
+- Voice dictation needs an internet connection and a LiVoice account.
 - Free accounts get 10 minutes of dictation per day.
 - The Android regular keyboard has no autocorrect or word suggestions.
 - The Mac app is for macOS only; there is no Windows version yet.
@@ -456,4 +456,4 @@ Email [support@aliahad.com](mailto:support@aliahad.com) or check the [service st
 
 ## License
 
-WoVoice is free to use. Its source code is published for viewing only; copying, modifying, redistributing, or using it commercially requires written permission. See the [WoVoice License](LICENSE.md).
+LiVoice is free to use. Its source code is published for viewing only; copying, modifying, redistributing, or using it commercially requires written permission. See the [LiVoice License](LICENSE.md).

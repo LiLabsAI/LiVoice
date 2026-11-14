@@ -24,6 +24,6 @@ if (valid) {
   document.querySelector("#callback-message").textContent =
     "This secure sign-in response is missing or has expired.";
   document.querySelector("#callback-help").textContent =
-    "Return to WoVoice and tap Sign in to request a new verification code.";
+    "Return to LiVoice and tap Sign in to request a new verification code.";
   openApp.classList.add("hidden");
 }

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.0 — 2026-11-14 (Desktop 1.3.0)
+
+- Rebranded Android, macOS Desktop, Worker web pages, Admin portal, and documentation from WoVoice to **LiVoice**, with a new logo mark, app/adaptive icons, tray templates, and keyboard toolbar emblem.
+- Moved repository links to `LiLabsAI/LiVoice` and published signed `LiVoice-1.9.0.apk` and `livoice-desktop-1.3.0.dmg` releases.
+
 ## Unreleased
 
 ### iOS — in development

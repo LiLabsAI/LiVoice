@@ -5,9 +5,9 @@ fetch("/v1/status", { headers: { Accept: "application/json" }, cache: "no-store"
   })
   .then((value) => {
     document.querySelector("#service-status").textContent = value.status === "online"
-      ? "All WoVoice systems are operational."
-      : "WoVoice is currently unavailable.";
+      ? "All LiVoice systems are operational."
+      : "LiVoice is currently unavailable.";
   })
   .catch(() => {
-    document.querySelector("#service-status").textContent = "WoVoice is currently unavailable.";
+    document.querySelector("#service-status").textContent = "LiVoice is currently unavailable.";
   });

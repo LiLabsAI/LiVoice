@@ -285,7 +285,7 @@ export class DictationService {
       const token = await this.deps.getToken()
       const target = await targetPromise
       if (!active()) return
-      if (!target?.token) { this.fail(target?.reason === 'accessibility' ? 'Allow Accessibility access for WoVoice in Settings, then try again.' : 'This editor does not expose a safe insertion target. Select a supported text box and try again.'); return }
+      if (!target?.token) { this.fail(target?.reason === 'accessibility' ? 'Allow Accessibility access for LiVoice in Settings, then try again.' : 'This editor does not expose a safe insertion target. Select a supported text box and try again.'); return }
       const context = (): DictationContext | undefined => {
         const captured = restrictContext(target.context, this.deps.settings.contextLevel)
         return captured ? { ...captured, style: this.deps.settings.contextStyle } : undefined

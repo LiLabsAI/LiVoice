@@ -76,7 +76,7 @@ final class AudioCapture: CaptureEngine {
         self.engine = engine; self.accumulator = accumulator
     }
     func begin() throws {
-        guard active else { throw APIError(code: "MICROPHONE_INACTIVE", message: "Open WoVoice and start a new keyboard session.") }
+        guard active else { throw APIError(code: "MICROPHONE_INACTIVE", message: "Open LiVoice and start a new keyboard session.") }
         accumulator?.begin()
     }
     func finish() throws -> (wav: Data, duration: Double) {

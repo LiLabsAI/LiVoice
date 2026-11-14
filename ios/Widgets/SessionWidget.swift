@@ -11,8 +11,8 @@ struct SessionWidget: Widget {
             HStack(spacing: 16) {
                 Image(systemName: "waveform").font(.title2).foregroundStyle(.orange)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("WoVoice keyboard session").font(.headline)
-                    Text(context.isStale ? "Session ended · Open WoVoice" : context.state.phase).font(.caption)
+                    Text("LiVoice keyboard session").font(.headline)
+                    Text(context.isStale ? "Session ended · Open LiVoice" : context.state.phase).font(.caption)
                     if !context.isStale { countdown(context.state.expiresAt) }
                 }
                 Spacer()
@@ -21,14 +21,14 @@ struct SessionWidget: Widget {
                 .widgetURL(context.isStale ? URL(string: "wovoice-ios://session")! : SessionControl.stopURL)
         } dynamicIsland: { context in
             DynamicIsland {
-                DynamicIslandExpandedRegion(.leading) { Label("WoVoice", systemImage: "waveform").foregroundStyle(.orange) }
+                DynamicIslandExpandedRegion(.leading) { Label("LiVoice", systemImage: "waveform").foregroundStyle(.orange) }
                 DynamicIslandExpandedRegion(.trailing) {
                     if context.isStale { Text("Ended").font(.caption) }
                     else { countdown(context.state.expiresAt) }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     HStack {
-                        Text(context.isStale ? "Session ended · Open WoVoice" : context.state.phase).font(.caption)
+                        Text(context.isStale ? "Session ended · Open LiVoice" : context.state.phase).font(.caption)
                         Spacer()
                         if !context.isStale { Link(destination: SessionControl.stopURL) { Label("Open to stop microphone", systemImage: "stop.fill") } }
                     }

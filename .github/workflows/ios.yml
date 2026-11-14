@@ -20,7 +20,7 @@ jobs:
         run: |
           xcodebuild -version
           swift --version
-          swift --version | python3 -c 'import re,sys; version=tuple(map(int,re.search(r"Swift version (\d+)\.(\d+)",sys.stdin.read()).groups())); assert version >= (6,2), "WoVoice requires Xcode 26 / Swift 6.2 or newer"'
+          swift --version | python3 -c 'import re,sys; version=tuple(map(int,re.search(r"Swift version (\d+)\.(\d+)",sys.stdin.read()).groups())); assert version >= (6,2), "LiVoice requires Xcode 26 / Swift 6.2 or newer"'
       - name: Install XcodeGen
         run: HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
       - name: Test shared policies and storage

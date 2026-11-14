@@ -22,7 +22,7 @@ struct KeyboardStatus: Codable {
     var owner: String?
     var request: UUID?
     var phase = "unavailable"
-    var message = "Open WoVoice to start a keyboard session."
+    var message = "Open LiVoice to start a keyboard session."
     var result: String?
     var resultExpiresAt: Date?
     var preferences = ContextPreferences()
@@ -76,7 +76,7 @@ struct KeyboardBridge {
         guard let directory = container?.appendingPathComponent("commands", isDirectory: true) else { throw APIError(code: "APP_GROUP_UNAVAILABLE", message: "The shared keyboard container is unavailable.") }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-        guard files.count < 64 else { throw APIError(code: "KEYBOARD_BUSY", message: "Open WoVoice to reconnect your keyboard session.") }
+        guard files.count < 64 else { throw APIError(code: "KEYBOARD_BUSY", message: "Open LiVoice to reconnect your keyboard session.") }
         try JSONEncoder().encode(command).write(to: directory.appendingPathComponent(command.id.uuidString + ".json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
     func drainCommands() -> [KeyboardCommand] {

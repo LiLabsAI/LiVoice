@@ -91,8 +91,8 @@ export class DesktopAuth {
 
       response.writeHead(200, headers)
       response.end(
-        '<!doctype html><meta charset="utf-8"><title>WoVoice</title>' +
-          '<p style="font-family:system-ui;padding:2rem">Sign-in complete — return to the WoVoice app.</p>'
+        '<!doctype html><meta charset="utf-8"><title>LiVoice</title>' +
+          '<p style="font-family:system-ui;padding:2rem">Sign-in complete — return to the LiVoice app.</p>'
       )
 
       const code = url.searchParams.get('code') ?? ''

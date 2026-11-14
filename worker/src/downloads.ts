@@ -9,10 +9,10 @@
  * on the Releases page instead of a broken link.
  */
 
-const REPOSITORY = "aliahadmd/wovoice";
+const REPOSITORY = "LiLabsAI/LiVoice";
 const RELEASES_PAGE = `https://github.com/${REPOSITORY}/releases`;
 const ASSET_PREFIX = `https://github.com/${REPOSITORY}/releases/download/`;
-const CACHE_KEY = "https://wovoice.aliahad.com/__cache/github-releases-v2";
+const CACHE_KEY = "https://wovoice.aliahad.com/__cache/github-releases-v3";
 const CACHE_SECONDS = 600;
 const LINK_MAX_AGE_SECONDS = 300;
 
@@ -40,11 +40,11 @@ export const productionDownloadDeps: DownloadDeps = {
 const PLATFORMS: Record<DownloadPlatform, { tag: RegExp; assetName: (version: string) => string }> = {
   mac: {
     tag: /^desktop-v(\d+(?:\.\d+)*)$/u,
-    assetName: (version) => `wovoice-desktop-${version}.dmg`,
+    assetName: (version) => `livoice-desktop-${version}.dmg`,
   },
   android: {
     tag: /^v(\d+(?:\.\d+)*)$/u,
-    assetName: (version) => `WoVoice-${version}.apk`,
+    assetName: (version) => `LiVoice-${version}.apk`,
   },
 };
 
@@ -112,7 +112,7 @@ export async function latestDownloads(deps: DownloadDeps, ctx?: ExecutionContext
 
 async function fromFeed(deps: DownloadDeps): Promise<LatestDownloads> {
   const response = await deps.fetch(`${RELEASES_PAGE}.atom`, {
-    headers: { Accept: "application/atom+xml", "User-Agent": "wovoice-website" },
+    headers: { Accept: "application/atom+xml", "User-Agent": "livoice-website" },
   });
   if (!response.ok) throw new Error(`GitHub feed answered ${response.status}`);
   const feed = await response.text();

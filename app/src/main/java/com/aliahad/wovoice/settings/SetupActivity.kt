@@ -365,7 +365,7 @@ class SetupActivity : AppCompatActivity() {
             }
             addView(usageTotalText)
             addView(TextView(this@SetupActivity).apply {
-                text = "Estimated WoVoice usage — not a Cloudflare invoice"
+                text = "Estimated LiVoice usage — not a Cloudflare invoice"
                 styleText(12.5f, MUTED)
                 setPadding(0, dp(3), 0, dp(12))
             })
@@ -423,8 +423,8 @@ class SetupActivity : AppCompatActivity() {
         readinessText.text = listOf(
             statusLine(mic, "Microphone ready", "Microphone permission needed"),
             statusLine(selected || (store.floatingBubbleEnabled && BubbleAccessibilityService.isEnabled(this) && BubbleAccessibilityService.isConnected()),
-                if (selected) "WoVoice selected" else "Bubble ready — keep your current keyboard",
-                if (enabled) "Choose WoVoice or enable the dictation bubble" else "Enable the keyboard or dictation bubble"),
+                if (selected) "LiVoice selected" else "Bubble ready — keep your current keyboard",
+                if (enabled) "Choose LiVoice or enable the dictation bubble" else "Enable the keyboard or dictation bubble"),
             statusLine(online, "Network available", "Network unavailable — manual keyboard still works"),
             statusLine(connected, "Account verified", accountUnavailable),
         ).joinToString("\n")
@@ -468,7 +468,7 @@ class SetupActivity : AppCompatActivity() {
             clipToPadding = false
             setPadding(0, 0, 0, dp(22))
         }
-        historyEmpty = emptyState("No dictations yet.\nUse WoVoice in any text field and your successful results will appear here.")
+        historyEmpty = emptyState("No dictations yet.\nUse LiVoice in any text field and your successful results will appear here.")
         listFrame.addView(historyRecycler, frame(match = true))
         listFrame.addView(historyEmpty, frame(match = true))
         root.addView(listFrame, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -515,7 +515,7 @@ class SetupActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(15), dp(20), 0)
         }
-        root.addView(screenHeader("Dictionary", "Names and terms WoVoice should recognize", "+ Add") { showTermDialog() })
+        root.addView(screenHeader("Dictionary", "Names and terms LiVoice should recognize", "+ Add") { showTermDialog() })
         dictionaryTabs = segmented(listOf("Confirmed", "Suggestions"), 0) { index ->
             dictionaryConfirmed = index == 0
             styleSegmented(dictionaryTabs, index)
@@ -562,7 +562,7 @@ class SetupActivity : AppCompatActivity() {
             dictionaryEmpty.text = if (dictionaryConfirmed) {
                 "No confirmed terms yet.\nAdd important names or specialist words."
             } else {
-                "No suggestions to review.\nWoVoice will suggest unusual words after a correction."
+                "No suggestions to review.\nLiVoice will suggest unusual words after a correction."
             }
             dictionaryEmpty.visibility = if (values.isEmpty()) View.VISIBLE else View.GONE
             dictionaryRecycler.visibility = if (values.isEmpty()) View.GONE else View.VISIBLE
@@ -601,10 +601,10 @@ class SetupActivity : AppCompatActivity() {
                 styleText(13f, MUTED)
                 setLineSpacing(dp(2).toFloat(), 1.12f)
             },
-            settingAction("Accessibility connection", "If disconnected, turn WoVoice off and on once in Accessibility", "Reconnect") {
+            settingAction("Accessibility connection", "If disconnected, turn LiVoice off and on once in Accessibility", "Reconnect") {
                 if (store.floatingBubbleEnabled) openBubbleAccessibilitySettings() else enableBubble()
             },
-            settingAction("Keep the bubble available", "Allow background activity so your phone does not stop WoVoice", "Configure", ::showBubbleBackgroundHelp),
+            settingAction("Keep the bubble available", "Allow background activity so your phone does not stop LiVoice", "Configure", ::showBubbleBackgroundHelp),
         )))
 
         contextStatus = statusText()
@@ -661,7 +661,7 @@ class SetupActivity : AppCompatActivity() {
             "Sign out",
         ) { confirmSignOut() }
         accountDeleteAction = destructiveAction(
-            "Delete WoVoice account",
+            "Delete LiVoice account",
             "Fresh email verification permanently removes cloud account data",
         ) { confirmAccountDeletion() }
         body.addView(settingsCard("ACCOUNT", listOf(
@@ -690,7 +690,7 @@ class SetupActivity : AppCompatActivity() {
 
         body.addView(settingsCard("HISTORY & ANALYTICS", listOf(
             settingSwitch("Keep local history", "Store successful generated text until you delete it", store.historyEnabled) { store.historyEnabled = it },
-            settingSwitch("Show cost estimates", "WoVoice-only estimates in USD", store.costEstimatesEnabled) { store.costEstimatesEnabled = it; refreshHome() },
+            settingSwitch("Show cost estimates", "LiVoice-only estimates in USD", store.costEstimatesEnabled) { store.costEstimatesEnabled = it; refreshHome() },
             destructiveAction("Clear history", "Remove generated text but keep anonymous totals") { confirmClearHistory() },
             destructiveAction("Reset analytics", "Remove dictation and estimated usage totals") { confirmResetAnalytics() },
         )))
@@ -706,7 +706,7 @@ class SetupActivity : AppCompatActivity() {
 
         body.addView(settingsCard("PRIVACY & DATA", listOf(
             TextView(this).apply {
-                text = "Recordings are temporary and deleted after dictation. A failed bubble upload may stay on this phone for up to a minute for Retry, and is removed on cancel or a text-box change. Optional automatic context sends a writing-task category; Nearby text also sends up to 512 characters before and 128 after the cursor for this request only. Context is not saved in history, sync, or logs; source-app identity stays on this phone. Synced history, approved dictionary entries, and analytics are encrypted for storage by WoVoice."
+                text = "Recordings are temporary and deleted after dictation. A failed bubble upload may stay on this phone for up to a minute for Retry, and is removed on cancel or a text-box change. Optional automatic context sends a writing-task category; Nearby text also sends up to 512 characters before and 128 after the cursor for this request only. Context is not saved in history, sync, or logs; source-app identity stays on this phone. Synced history, approved dictionary entries, and analytics are encrypted for storage by LiVoice."
                 styleText(14f, MUTED)
                 setLineSpacing(dp(3).toFloat(), 1.15f)
                 setPadding(0, dp(4), 0, dp(10))
@@ -715,7 +715,7 @@ class SetupActivity : AppCompatActivity() {
         )))
 
         body.addView(settingsCard("ABOUT", listOf(
-            fixedSetting("WoVoice", "Version ${packageManager.getPackageInfo(packageName, 0).versionName}"),
+            fixedSetting("LiVoice", "Version ${packageManager.getPackageInfo(packageName, 0).versionName}"),
             fixedSetting("Service", "wovoice.aliahad.com • Cloudflare Workers AI"),
             fixedSetting("Storage", "Encrypted sync • no backup • no analytics SDK"),
         )))
@@ -733,9 +733,9 @@ class SetupActivity : AppCompatActivity() {
         val enabled = manager.enabledInputMethodList.any { it.packageName == packageName }
         val selected = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)?.startsWith(packageName) == true
         keyboardStatus?.text = when {
-            selected -> "✓ WoVoice is selected"
-            enabled -> "Enabled — choose WoVoice as active keyboard"
-            else -> "WoVoice is not enabled yet"
+            selected -> "✓ LiVoice is selected"
+            enabled -> "Enabled — choose LiVoice as active keyboard"
+            else -> "LiVoice is not enabled yet"
         }
         keyboardStatus?.setTextColor(if (selected) SUCCESS else MUTED)
         val signedIn = account.signedIn
@@ -745,7 +745,7 @@ class SetupActivity : AppCompatActivity() {
             !signedIn -> "Sign in to enable cloud speech"
             status.state == AccountState.SUSPENDED -> "Account suspended • ${account.email ?: "Verified account"}"
             status.state == AccountState.BANNED -> "Account banned • ${account.email ?: "Verified account"}"
-            else -> "✓ ${account.email ?: "Verified WoVoice account"}"
+            else -> "✓ ${account.email ?: "Verified LiVoice account"}"
         }
         accountStatus?.setTextColor(when {
             restricted -> ERROR
@@ -798,13 +798,13 @@ class SetupActivity : AppCompatActivity() {
     private fun showBubbleBackgroundHelp() {
         val xiaomi = Build.MANUFACTURER.lowercase(Locale.ROOT) in setOf("xiaomi", "redmi", "poco")
         val steps = if (xiaomi) {
-            "In WoVoice’s App info:\n\n1. Enable Autostart.\n2. Open Power and choose No restrictions.\n3. In Recents, hold the WoVoice card and tap its lock icon to protect it from Clear all.\n\nSome Xiaomi versions force-stop an app when you swipe its card away, which can also turn Accessibility off. Use Home or Back to close the screen."
+            "In LiVoice’s App info:\n\n1. Enable Autostart.\n2. Open Power and choose No restrictions.\n3. In Recents, hold the LiVoice card and tap its lock icon to protect it from Clear all.\n\nSome Xiaomi versions force-stop an app when you swipe its card away, which can also turn Accessibility off. Use Home or Back to close the screen."
         } else {
-            "In WoVoice’s App info, open Battery or App battery usage and allow background activity (Unrestricted, if available). Your phone may also have an Autostart setting.\n\nUse Home or Back to close the screen while keeping dictation available."
+            "In LiVoice’s App info, open Battery or App battery usage and allow background activity (Unrestricted, if available). Your phone may also have an Autostart setting.\n\nUse Home or Back to close the screen while keeping dictation available."
         }
         MaterialAlertDialogBuilder(this)
             .setTitle("Keep the bubble available")
-            .setMessage("Android keeps the Accessibility connection in the background. The microphone runs only when you start dictation.\n\n$steps\n\nAfter Force stop or turning Accessibility off, reopen WoVoice and tap Reconnect. Android requires you to enable that access yourself.")
+            .setMessage("Android keeps the Accessibility connection in the background. The microphone runs only when you start dictation.\n\n$steps\n\nAfter Force stop or turning Accessibility off, reopen LiVoice and tap Reconnect. Android requires you to enable that access yourself.")
             .setNegativeButton("Done", null)
             .setPositiveButton("App settings") { _, _ ->
                 startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
@@ -826,8 +826,8 @@ class SetupActivity : AppCompatActivity() {
                 else MaterialAlertDialogBuilder(this)
                     .setTitle(if (level == ContextLevel.NEARBY) "Allow nearby text?" else "Allow app and field context?")
                     .setMessage(if (level == ContextLevel.NEARBY)
-                        "When you start dictation, WoVoice uses the focused editor and up to 512 characters before and 128 after your selection. These snippets go to WoVoice’s Cloudflare service with that recording to guide grammar and tone. They are not saved in history, sync, or logs. It does not read full conversations or contacts. Password and sensitive fields are excluded. You can switch this off at any time."
-                        else "When you start dictation, WoVoice detects the app and field locally and sends only a writing-task category, such as chat or email. App names, field labels, and existing text are not sent. Unknown situations keep your natural tone. You can switch this off at any time.")
+                        "When you start dictation, LiVoice uses the focused editor and up to 512 characters before and 128 after your selection. These snippets go to LiVoice’s Cloudflare service with that recording to guide grammar and tone. They are not saved in history, sync, or logs. It does not read full conversations or contacts. Password and sensitive fields are excluded. You can switch this off at any time."
+                        else "When you start dictation, LiVoice detects the app and field locally and sends only a writing-task category, such as chat or email. App names, field labels, and existing text are not sent. Unknown situations keep your natural tone. You can switch this off at any time.")
                     .setPositiveButton("Allow") { _, _ -> store.contextLevel = level; updateContextStatus() }
                     .setNegativeButton("Cancel", null).show()
             }.setNegativeButton("Cancel", null).show()
@@ -836,7 +836,7 @@ class SetupActivity : AppCompatActivity() {
     private fun enableBubble() {
         MaterialAlertDialogBuilder(this)
             .setTitle("Speak without switching keyboard")
-            .setMessage("WoVoice needs Accessibility access to find and edit the text box you select. Text already in the box is read on this phone to preserve it. Your recording and approved Dictionary terms are sent for transcription. Automatic context is off until you enable it separately; Nearby text requires a separate choice to send bounded cursor text for that dictation.\n\nRecording starts when you tap the bubble. Failed uploads may stay on this phone for up to a minute for Retry. Password and PIN fields are blocked. You can turn this off here at any time.")
+            .setMessage("LiVoice needs Accessibility access to find and edit the text box you select. Text already in the box is read on this phone to preserve it. Your recording and approved Dictionary terms are sent for transcription. Automatic context is off until you enable it separately; Nearby text requires a separate choice to send bounded cursor text for that dictation.\n\nRecording starts when you tap the bubble. Failed uploads may stay on this phone for up to a minute for Retry. Password and PIN fields are blocked. You can turn this off here at any time.")
             .setNegativeButton("Not now") { _, _ -> updateBubbleStatus() }
             .setOnCancelListener { updateBubbleStatus() }
             .setPositiveButton("Continue") { _, _ ->
@@ -856,7 +856,7 @@ class SetupActivity : AppCompatActivity() {
         if (shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
             MaterialAlertDialogBuilder(this)
                 .setTitle("Allow microphone access")
-                .setMessage("WoVoice records only while you ask it to listen. Recordings are deleted after dictation; a failed bubble upload can stay on this phone for up to a minute so you can retry.")
+                .setMessage("LiVoice records only while you ask it to listen. Recordings are deleted after dictation; a failed bubble upload can stay on this phone for up to a minute so you can retry.")
                 .setNegativeButton("Not now") { _, _ -> pendingBubbleSetup = false; updateBubbleStatus() }
                 .setPositiveButton("Continue") { _, _ -> permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }.show()
         } else permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -924,7 +924,7 @@ class SetupActivity : AppCompatActivity() {
         when (val result = withContext(Dispatchers.IO) { account.completeAccountDeletion(reauthToken, state) }) {
             is AccountResult.Success -> {
                 if (accountId != null) withContext(Dispatchers.IO) { repository.deleteAccountLocalData(accountId) }
-                Snackbar.make(contentHost, "WoVoice account and its local partition were deleted.", Snackbar.LENGTH_LONG).show()
+                Snackbar.make(contentHost, "LiVoice account and its local partition were deleted.", Snackbar.LENGTH_LONG).show()
                 updateSetupStatus(); refreshHome(); refreshHistory(); refreshDictionary()
             }
             is AccountResult.Error -> Snackbar.make(contentHost, result.message, Snackbar.LENGTH_LONG).show()
@@ -954,7 +954,7 @@ class SetupActivity : AppCompatActivity() {
             if (count <= 0) return@launch
             MaterialAlertDialogBuilder(this@SetupActivity)
                 .setTitle("Use existing local data?")
-                .setMessage("WoVoice found $count local history, analytics, or dictionary items from before accounts were added. Assign them to this verified account for encrypted sync, delete them, or decide later.")
+                .setMessage("LiVoice found $count local history, analytics, or dictionary items from before accounts were added. Assign them to this verified account for encrypted sync, delete them, or decide later.")
                 .setNeutralButton("Later", null)
                 .setNegativeButton("Delete") { _, _ ->
                     scope.launch { withContext(Dispatchers.IO) { repository.deleteUnassigned() } }
@@ -1054,7 +1054,7 @@ class SetupActivity : AppCompatActivity() {
             return
         }
         confirm(
-            "Sign out of WoVoice?",
+            "Sign out of LiVoice?",
             "Voice input and encrypted sync will pause. Your local data will remain on this phone.",
             "Sign out",
         ) {
@@ -1079,7 +1079,7 @@ class SetupActivity : AppCompatActivity() {
         }
         MaterialAlertDialogBuilder(this)
             .setTitle("Permanently delete account?")
-            .setMessage("WoVoice will require a fresh email code. Deletion removes all sessions, quota identity, and encrypted cloud records. This phone’s partition will also be removed. This cannot be undone.")
+            .setMessage("LiVoice will require a fresh email code. Deletion removes all sessions, quota identity, and encrypted cloud records. This phone’s partition will also be removed. This cannot be undone.")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Verify and delete") { _, _ -> startAccountLogin(SessionManager.AUTH_DELETE) }
             .show()
@@ -1134,7 +1134,7 @@ class SetupActivity : AppCompatActivity() {
         }
         MaterialAlertDialogBuilder(this)
             .setTitle("Stop syncing history?")
-            .setMessage("WoVoice will delete the dictated text stored in your account. History already on this phone and your other devices stays there; new dictations stay on the device that made them.")
+            .setMessage("LiVoice will delete the dictated text stored in your account. History already on this phone and your other devices stays there; new dictations stay on the device that made them.")
             .setNegativeButton("Keep syncing") { _, _ -> setSwitchSilently(switch, true) }
             .setOnCancelListener { setSwitchSilently(switch, true) }
             .setPositiveButton("Stop and delete") { _, _ -> updateHistorySync(false) }
@@ -1222,7 +1222,7 @@ class SetupActivity : AppCompatActivity() {
                 .format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM))
         }
         return buildString {
-            append(status.publicMessage ?: "This account cannot use WoVoice cloud services right now.")
+            append(status.publicMessage ?: "This account cannot use LiVoice cloud services right now.")
             if (until != null) append("\n\nSuspended until $until.")
             append("\n\nManual typing and local data remain available. For help, contact ${status.supportEmail}.")
         }
@@ -1233,7 +1233,7 @@ class SetupActivity : AppCompatActivity() {
         store.acknowledgedPolicyVersion = POLICY_VERSION
         Snackbar.make(
             contentHost,
-            "Sync no longer needs a recovery key: your history and dictionary are stored encrypted in your WoVoice account. Review the updated Privacy Policy.",
+            "Sync no longer needs a recovery key: your history and dictionary are stored encrypted in your LiVoice account. Review the updated Privacy Policy.",
             Snackbar.LENGTH_LONG,
         ).setAction("Review") { openServicePage("/privacy") }.show()
     }
@@ -1255,7 +1255,7 @@ class SetupActivity : AppCompatActivity() {
             capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
-    // Android 13+ silently drops the "WoVoice is listening" foreground notification
+    // Android 13+ silently drops the "LiVoice is listening" foreground notification
     // unless POST_NOTIFICATIONS was granted, so ask once the microphone is usable.
     private fun maybeRequestNotificationPermission() {
         if (notificationPermissionRequested) return
@@ -1318,7 +1318,7 @@ class SetupActivity : AppCompatActivity() {
     }
 
     private fun copyRecord(record: DictationRecord) {
-        setClipboard("WoVoice dictation", record.finalText)
+        setClipboard("LiVoice dictation", record.finalText)
         Snackbar.make(contentHost, "Copied to clipboard.", Snackbar.LENGTH_SHORT).show()
     }
 

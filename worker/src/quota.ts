@@ -59,7 +59,7 @@ export async function reserveQuota(
       throw new ApiError(429, "USER_QUOTA_EXCEEDED", false, "Your free dictation time is used for today.", retryAfter);
     }
     if (message.includes("SERVICE_DAILY_LIMIT_REACHED")) {
-      throw new ApiError(503, "SERVICE_DAILY_LIMIT_REACHED", true, "WoVoice has reached today's free service limit.", retryAfter);
+      throw new ApiError(503, "SERVICE_DAILY_LIMIT_REACHED", true, "LiVoice has reached today's free service limit.", retryAfter);
     }
     throw error;
   }

@@ -207,7 +207,7 @@ class SyncClient(private val baseUrlProvider: () -> String) : CloudSyncApi, Lega
                 AccountResult.Success(parser(if (text.isBlank()) JSONObject() else JSONObject(text)))
             } else parseError(text, status)
         } catch (_: Exception) {
-            AccountResult.Error("NETWORK_UNAVAILABLE", "Sync could not reach WoVoice.", true, 0)
+            AccountResult.Error("NETWORK_UNAVAILABLE", "Sync could not reach LiVoice.", true, 0)
         } finally {
             connection?.disconnect()
         }

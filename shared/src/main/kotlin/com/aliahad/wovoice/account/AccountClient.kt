@@ -170,7 +170,7 @@ class AccountClient(private val baseUrlProvider: () -> String) {
     ): AccountResult<T> {
         val endpoint = endpoint(path) ?: return AccountResult.Error(
             "INVALID_REQUEST",
-            "WoVoice has an invalid service address.",
+            "LiVoice has an invalid service address.",
             false,
             0,
         )
@@ -197,7 +197,7 @@ class AccountClient(private val baseUrlProvider: () -> String) {
         } catch (_: Exception) {
             AccountResult.Error(
                 "NETWORK_UNAVAILABLE",
-                "Could not reach WoVoice. Check your connection and try again.",
+                "Could not reach LiVoice. Check your connection and try again.",
                 true,
                 0,
             )
@@ -247,12 +247,12 @@ class AccountClient(private val baseUrlProvider: () -> String) {
         val error = JSONObject(body).optJSONObject("error")
         AccountResult.Error(
             code = error?.optString("code")?.takeIf(String::isNotBlank) ?: "HTTP_$status",
-            message = error?.optString("message")?.takeIf(String::isNotBlank) ?: "WoVoice request failed ($status).",
+            message = error?.optString("message")?.takeIf(String::isNotBlank) ?: "LiVoice request failed ($status).",
             retryable = error?.optBoolean("retryable", status >= 500) ?: (status >= 500),
             status = status,
             payload = body,
         )
-    }.getOrElse { AccountResult.Error("HTTP_$status", "WoVoice request failed ($status).", status >= 500, status) }
+    }.getOrElse { AccountResult.Error("HTTP_$status", "LiVoice request failed ($status).", status >= 500, status) }
 
     private fun readResponse(connection: HttpURLConnection, status: Int): String {
         val stream = if (status in 200..299) connection.inputStream else connection.errorStream

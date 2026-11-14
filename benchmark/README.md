@@ -1,10 +1,10 @@
-# WoVoice personal accuracy benchmark
+# LiVoice personal accuracy benchmark
 
 Record each prompt in `utterances.json` as a mono 16 kHz PCM WAV named
 `01.wav` through `30.wav`. Use the phone in your normal speaking voice: 20 in a
 quiet room and 10 with mild everyday background noise, as marked in the file.
 
-Run the same recordings against the production API with a short-lived WoVoice
+Run the same recordings against the production API with a short-lived LiVoice
 account access token:
 
 ```sh
