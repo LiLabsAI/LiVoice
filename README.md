@@ -15,6 +15,8 @@
   <a href="https://wovoice.aliahad.com/status"><strong>Service status</strong></a>
   ·
   <a href="https://wovoice.aliahad.com/privacy"><strong>Privacy</strong></a>
+  ·
+  <a href="LICENSE"><strong>GPLv3 License</strong></a>
 </p>
 
 LiVoice turns your speech into clean, punctuated text and puts it exactly where you were typing — in a chat, an email, a note, a browser, or any other app.
@@ -50,6 +52,7 @@ Enable **Automatic context** once in Settings to let LiVoice automatically adapt
 - [What the messages mean](#what-the-messages-mean)
 - [Troubleshooting](#troubleshooting)
 - [Current limits](#current-limits)
+- [Contributing & License](#license)
 
 ## What LiVoice does for you
 
@@ -456,4 +459,12 @@ Email [support@aliahad.com](mailto:support@aliahad.com) or check the [service st
 
 ## License
 
-LiVoice is free to use. Its source code is published for viewing only; copying, modifying, redistributing, or using it commercially requires written permission. See the [LiVoice License](LICENSE.md).
+Copyright (C) 2026 Ali Ahad.
+
+**LiVoice** is free and open-source software licensed under the **GNU General Public License v3.0 (`GPL-3.0`)**.
+
+- **Study, fork, and contribute:** You are free to study the code, fork this repository, modify it, build from source, and share improvements via pull requests on [GitHub](https://github.com/LiLabsAI/LiVoice).
+- **Copyleft protection:** Any distributed modified version or derivative work must also be licensed under the **GNU General Public License v3.0** with full source availability. Incorporating LiVoice code into distributed closed-source proprietary software is not permitted.
+- **Ownership & attribution:** Original authorship and copyright remain with **Ali Ahad**. Redistributions and forks must preserve original copyright notices, attribution notices, [LICENSE](LICENSE), and [NOTICE](NOTICE).
+
+See [LICENSE](LICENSE) for the full GNU GPLv3 text, [NOTICE](NOTICE) for attribution details, and [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.

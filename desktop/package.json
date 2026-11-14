@@ -4,6 +4,7 @@
   "description": "LiVoice speech-first dictation for macOS",
   "main": "./out/main/index.js",
   "author": "Ali Ahad",
+  "license": "GPL-3.0-only",
   "homepage": "https://electron-vite.org",
   "scripts": {
     "format": "prettier --write .",

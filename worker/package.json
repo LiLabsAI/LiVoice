@@ -1,6 +1,8 @@
 {
   "name": "wovoice-worker",
   "version": "1.0.0",
+  "author": "Ali Ahad",
+  "license": "GPL-3.0-only",
   "private": true,
   "type": "module",
   "scripts": {
