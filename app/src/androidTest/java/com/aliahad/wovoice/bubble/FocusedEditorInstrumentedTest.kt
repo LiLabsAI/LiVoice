@@ -104,6 +104,15 @@ class FocusedEditorInstrumentedTest {
         await { focused()?.text?.toString() == "Hello." }
     }
 
+    @Test fun insertsIntoCustomHintFieldEvenWhenShowingHintFlagIsFalse() {
+        field("Custom hint test box").performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        await { focused()?.contentDescription == "Custom hint test box" }
+        val editor = FocusedEditor.capture(focused())
+        assertNotNull("A custom editor reporting matching hint text and -1 selection must accept dictation", editor)
+        assertTrue(editor!!.insert("Hello.", focused()))
+        await { focused()?.text?.toString() == "Hello." }
+    }
+
     @Test fun refusesOversizedInsertionWithoutTruncatingExistingText() {
         focusLimitedField(5, 5)
         val editor = FocusedEditor.capture(focused())!!

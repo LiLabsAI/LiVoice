@@ -4,12 +4,14 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.text.InputFilter;
 import android.text.InputType;
+import android.os.Build;
 import android.text.Editable;
 import android.text.Spanned;
 import android.text.SpannableString;
 import android.text.TextWatcher;
 import android.text.style.StyleSpan;
 import android.graphics.Typeface;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -32,17 +34,52 @@ public class BubbleEditorFixtureActivity extends Activity {
             if (index == 4) field.setFilters(new InputFilter[] {new InputFilter.LengthFilter(10)});
             field.setText(index == 0 ? "Before after" : index == 3 ? "" : index == 4 ? "HelloWorld" : "Untouched");
             if (index == 3) field.setHint("This hint must not become dictated text");
-            field.setMinHeight(160);
-            body.addView(field, new LinearLayout.LayoutParams(-1, 180));
+            field.setMinHeight(120);
+            body.addView(field, new LinearLayout.LayoutParams(-1, 140));
             if (index == 0) { field.requestFocus(); field.setSelection(6); }
         }
+        EditText customHint = new EditText(this) {
+            @Override public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(info);
+                if (getText() != null && getText().length() == 0) {
+                    info.setText("Message");
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        info.setHintText("Message");
+                        info.setShowingHintText(false);
+                    }
+                    info.setTextSelection(-1, -1);
+                }
+            }
+        };
+        customHint.setContentDescription("Custom hint test box");
+        customHint.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        body.addView(customHint, new LinearLayout.LayoutParams(-1, 140));
+
+        EditText mentionableStyle = new EditText(this) {
+            @Override public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
+                super.onInitializeAccessibilityNodeInfo(info);
+                if (getText() != null && getText().length() == 0) {
+                    // Matches WhatsApp MentionableEntry reporting placeholder "Message" with empty hintText.
+                    info.setText("Message");
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        info.setHintText("");
+                        info.setShowingHintText(false);
+                    }
+                    info.setTextSelection(-1, -1);
+                }
+            }
+        };
+        mentionableStyle.setContentDescription("WhatsApp style leaked hint box");
+        mentionableStyle.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        body.addView(mentionableStyle, new LinearLayout.LayoutParams(-1, 140));
+
         EditText rich = new EditText(this);
         rich.setContentDescription("Rich test text box");
         SpannableString styled = new SpannableString("Bold tail");
         styled.setSpan(new StyleSpan(Typeface.BOLD), 0, 4, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         styled.setSpan(new StyleSpan(Typeface.ITALIC), 5, 9, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         rich.setText(styled);
-        body.addView(rich, new LinearLayout.LayoutParams(-1, 180));
+        body.addView(rich, new LinearLayout.LayoutParams(-1, 140));
         TextView status = new TextView(this);
         status.setContentDescription("Rich formatting status");
         status.setText("Formatting preserved");

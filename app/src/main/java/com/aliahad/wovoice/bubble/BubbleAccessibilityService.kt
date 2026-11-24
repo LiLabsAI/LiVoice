@@ -39,7 +39,9 @@ import androidx.annotation.RequiresApi
 import com.aliahad.wovoice.R
 import com.aliahad.wovoice.account.AccountResult
 import com.aliahad.wovoice.account.SessionManager
+import com.aliahad.wovoice.core.EditorPolicy
 import com.aliahad.wovoice.core.EditorSessionGuard
+import com.aliahad.wovoice.context.ContextLevel
 import com.aliahad.wovoice.context.DictationContext
 import com.aliahad.wovoice.data.AndroidGraph
 import com.aliahad.wovoice.network.TranscriptionClient
@@ -76,6 +78,7 @@ class BubbleAccessibilityService : AccessibilityService() {
     private var recorder: WavRecorder? = null
     private var networkJob: Job? = null
     private var target: FocusedEditor? = null
+    private var targetNode: AccessibilityNodeInfo? = null
     private var targetInput: BubbleInputMethod.Target? = null
     private var editorMethod: BubbleInputMethod? = null
     private var captureSession = 0L
@@ -162,9 +165,14 @@ class BubbleAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (!::settings.isInitialized) return
         if (state != State.IDLE && !committing) {
-            val editor = target
             val anotherField = event?.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED &&
-                event.source?.let { it.isEditable && editor?.isSameNode(it) == false } == true
+                event.source?.let { node ->
+                    node.isEditable && when {
+                        targetNode != null -> node != targetNode
+                        targetInput != null -> node.packageName?.toString() != targetInput?.ownerPackage
+                        else -> true
+                    }
+                } == true
             if (anotherField || !targetIsCurrent()) cancelWork()
         }
         // Throttle instead of restarting a debounce: a changing app must not starve the bubble.
@@ -210,10 +218,134 @@ class BubbleAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
-    private fun inputFocus(): AccessibilityNodeInfo? = runCatching {
-        // A tap can make our overlay the active window. Input focus still belongs to the editor.
-        findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-    }.getOrNull()
+    private sealed interface FocusResult {
+        data class Node(val node: AccessibilityNodeInfo) : FocusResult
+        data object Sensitive : FocusResult
+        data object None : FocusResult
+    }
+
+    private data class CaptureCandidate(
+        val focusedNode: AccessibilityNodeInfo?,
+        val editor: FocusedEditor?,
+        val inputTarget: BubbleInputMethod.Target?,
+    )
+
+    private fun inputFocus(): AccessibilityNodeInfo? = (resolveFocus() as? FocusResult.Node)?.node
+
+    private fun resolveFocus(): FocusResult = runCatching {
+        val activeImePackage = if (Build.VERSION.SDK_INT >= 33) editorMethod?.activePackageName() else null
+        // A tap can make our overlay the active window. Check global FOCUS_INPUT first.
+        inspectFocusedCandidate(findFocus(AccessibilityNodeInfo.FOCUS_INPUT), allowSubtree = true)?.let {
+            return@runCatching it
+        }
+
+        // Fall back across interactive application windows (e.g. OEM focus quirks, bottom sheets, wrappers).
+        val orderedWindows = windows
+            .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            .sortedByDescending { window ->
+                val pkgMatch = activeImePackage != null && window.root?.packageName?.toString() == activeImePackage
+                (if (window.isFocused) 4 else 0) + (if (window.isActive) 2 else 0) + (if (pkgMatch) 1 else 0)
+            }
+
+        for (window in orderedWindows) {
+            val root = window.root ?: continue
+            inspectWindowRoot(root, activeImePackage)?.let { return@runCatching it }
+        }
+
+        if (orderedWindows.isEmpty()) {
+            rootInActiveWindow?.let { root ->
+                inspectWindowRoot(root, activeImePackage)?.let { return@runCatching it }
+            }
+        }
+        FocusResult.None
+    }.getOrDefault(FocusResult.None)
+
+    private fun inspectFocusedCandidate(candidate: AccessibilityNodeInfo?, allowSubtree: Boolean): FocusResult? {
+        if (candidate == null || !candidate.refresh()) return null
+        if (isSensitiveNode(candidate)) return FocusResult.Sensitive
+        if (isUsableEditable(candidate)) return FocusResult.Node(candidate)
+        if (!allowSubtree) return null
+        return findEditableInSubtree(candidate, maxVisited = 64)
+            ?: if (candidate.isFocused) findUniqueEditableInSubtree(candidate, maxVisited = 64) else null
+    }
+
+    private fun inspectWindowRoot(root: AccessibilityNodeInfo, activeImePackage: String?): FocusResult? {
+        inspectFocusedCandidate(root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT), allowSubtree = true)?.let { return it }
+        findEditableInSubtree(root, maxVisited = 250)?.let { return it }
+        if (activeImePackage != null && root.packageName?.toString() == activeImePackage) {
+            return findUniqueEditableInSubtree(root, maxVisited = 250)
+        }
+        return null
+    }
+
+    private fun findEditableInSubtree(root: AccessibilityNodeInfo, maxVisited: Int): FocusResult? {
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        var visited = 0
+        while (queue.isNotEmpty() && visited < maxVisited) {
+            val node = queue.removeFirst()
+            visited++
+            if (node.isFocused) {
+                if (isSensitiveNode(node)) return FocusResult.Sensitive
+                if (isUsableEditable(node)) return FocusResult.Node(node)
+            }
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let(queue::add)
+            }
+        }
+        return null
+    }
+
+    private fun findUniqueEditableInSubtree(root: AccessibilityNodeInfo, maxVisited: Int): FocusResult? {
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        var visited = 0
+        var match: AccessibilityNodeInfo? = null
+        while (queue.isNotEmpty() && visited < maxVisited) {
+            val node = queue.removeFirst()
+            visited++
+            if (node.isEditable && node.isEnabled && node.isVisibleToUser) {
+                if (isSensitiveNode(node)) return FocusResult.Sensitive
+                if (match != null) return null
+                match = node
+            }
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let(queue::add)
+            }
+        }
+        return match?.let(FocusResult::Node)
+    }
+
+    private fun isSensitiveNode(node: AccessibilityNodeInfo): Boolean =
+        node.isPassword || EditorPolicy.isSensitive(node.inputType)
+
+    private fun isUsableEditable(node: AccessibilityNodeInfo): Boolean =
+        node.isEditable && node.isEnabled && node.isVisibleToUser && !isSensitiveNode(node)
+
+    private fun hasActiveWindowFor(ownerPackage: String): Boolean = runCatching {
+        val appPackages = windows
+            .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            .mapNotNull { it.root?.packageName?.toString() }
+        if (appPackages.isNotEmpty()) return@runCatching ownerPackage in appPackages
+        val activePkg = rootInActiveWindow?.packageName?.toString()
+        activePkg == null || activePkg == ownerPackage
+    }.getOrDefault(true)
+
+    private fun captureCandidate(): CaptureCandidate? = when (val focus = resolveFocus()) {
+        FocusResult.Sensitive -> null
+        is FocusResult.Node -> {
+            val node = focus.node
+            val connection = nativeInput(node)
+            val editor = FocusedEditor.capture(node, connection != null)
+            if (editor != null || connection != null) {
+                CaptureCandidate(focusedNode = node, editor = editor, inputTarget = connection)
+            } else null
+        }
+        FocusResult.None -> {
+            val connection = nativeInput(null)?.takeIf { hasActiveWindowFor(it.ownerPackage) }
+            connection?.let { CaptureCandidate(focusedNode = null, editor = null, inputTarget = it) }
+        }
+    }
 
     private fun ownKeyboardSelected(): Boolean = Settings.Secure.getString(
         contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD,
@@ -222,10 +354,29 @@ class BubbleAccessibilityService : AccessibilityService() {
     private fun deviceLocked(): Boolean = getSystemService(KeyguardManager::class.java).isKeyguardLocked ||
         !getSystemService(PowerManager::class.java).isInteractive
 
-    private fun targetIsCurrent(): Boolean = !deviceLocked() && !ownKeyboardSelected() &&
-        settings.accountId == captureOwner &&
-        (Build.VERSION.SDK_INT < 33 || targetInput?.isCurrent() != false) &&
-        target?.matches(inputFocus()) == true
+    private fun targetIsCurrent(): Boolean {
+        if (deviceLocked() || ownKeyboardSelected() || settings.accountId != captureOwner) return false
+        val focus = resolveFocus()
+        if (focus == FocusResult.Sensitive) return false
+        val focusedNow = (focus as? FocusResult.Node)?.node
+        val editor = target
+        val connection = targetInput
+        if (editor != null) {
+            return (Build.VERSION.SDK_INT < 33 || connection?.isCurrent() != false) &&
+                editor.matches(focusedNow)
+        }
+        if (Build.VERSION.SDK_INT >= 33 && connection != null) {
+            if (!connection.isCurrent() || connection.hasSelectionMoved()) return false
+            if (focusedNow != null) {
+                if (focusedNow.packageName?.toString() != connection.ownerPackage) return false
+                if (targetNode != null && focusedNow != targetNode) return false
+            } else if (!hasActiveWindowFor(connection.ownerPackage)) {
+                return false
+            }
+            return true
+        }
+        return false
+    }
 
     private fun nativeInput(node: AccessibilityNodeInfo?): BubbleInputMethod.Target? =
         if (Build.VERSION.SDK_INT >= 33) editorMethod?.capture(node) else null
@@ -236,8 +387,7 @@ class BubbleAccessibilityService : AccessibilityService() {
             removeBubble()
             return
         }
-        val focused = inputFocus()
-        if (focused == null || !FocusedEditor.isSupported(focused, nativeInput(focused) != null)) {
+        if (captureCandidate() == null) {
             if (state != State.IDLE && !committing) cancelWork()
             removeBubble()
             return
@@ -373,17 +523,20 @@ class BubbleAccessibilityService : AccessibilityService() {
             showMessage(if (account.signedIn) "Account unavailable" else "Sign in to dictate", "Open app", ::openSetup)
             return
         }
-        val focused = inputFocus()
-        val connection = nativeInput(focused)
-        val editor = FocusedEditor.capture(focused, connection != null)
-        if (editor == null) {
+        val candidate = captureCandidate()
+        if (candidate == null) {
             showMessage("Select a text box first.")
+            scheduleRefresh()
             return
         }
-        target = editor
-        targetInput = connection
+        target = candidate.editor
+        targetNode = candidate.focusedNode
+        targetInput = candidate.inputTarget
         captureOwner = settings.accountId
-        capturedContext = if (Build.VERSION.SDK_INT >= 33 && connection?.allowsContext == false) null else editor.context(settings.contextLevel, settings.contextStyle)
+        if (Build.VERSION.SDK_INT >= 33 && candidate.inputTarget != null && candidate.editor == null) {
+            candidate.inputTarget.captureBaselineAsync(scope)
+        }
+        capturedContext = captureInitialContext(candidate)
         captureSession = sessions.begin()
         val session = captureSession
         state = State.RECORDING
@@ -438,8 +591,18 @@ class BubbleAccessibilityService : AccessibilityService() {
         bubble?.render("Thinking…", recording = false, processing = true)
         networkJob = scope.launch {
             try {
-                val editor = target ?: return@launch
-                val response = withContext(Dispatchers.IO) { transcribe(result.file, editor.sentenceStart) }
+                val editor = target
+                val connection = targetInput
+                if (editor == null && (Build.VERSION.SDK_INT < 33 || connection == null)) return@launch
+                val baseline = if (Build.VERSION.SDK_INT >= 33 && connection != null && editor == null) {
+                    connection.awaitBaseline(150)
+                } else null
+                if (!sessions.isActive(session) || !targetIsCurrent()) return@launch
+                if (editor == null && Build.VERSION.SDK_INT >= 33 && connection != null && baseline != null) {
+                    capturedContext = connection.baselineContext(targetNode, settings.contextLevel, settings.contextStyle)
+                }
+                val sentenceStart = editor?.sentenceStart ?: baseline?.sentenceStart ?: true
+                val response = withContext(Dispatchers.IO) { transcribe(result.file, sentenceStart) }
                 if (!sessions.isActive(session) || !targetIsCurrent()) return@launch
                 when (response) {
                     is TranscriptionClient.Result.Success -> {
@@ -455,21 +618,12 @@ class BubbleAccessibilityService : AccessibilityService() {
                         }
                         committing = true
                         val insertionResult = try {
-                            val connection = targetInput
-                            if (Build.VERSION.SDK_INT >= 33 && connection != null) connection.insert(editor, response.text, ::inputFocus)
-                            else {
-                                val focused = inputFocus()
-                                withContext(Dispatchers.IO) {
-                                    if (editor.isWebContent()) BubbleCommitResult.UNSUPPORTED
-                                    else if (editor.insert(response.text, focused)) BubbleCommitResult.ACCEPTED else BubbleCommitResult.REJECTED
-                                }
-                            }
+                            commitInsertion(editor, connection, targetNode?.maxTextLength?.takeIf { it >= 0 }, response.text)
                         } finally { committing = false }
                         if (insertionResult == BubbleCommitResult.ACCEPTED) {
                             retry = null
                             handler.removeCallbacks(expireRetry)
-                            target = null
-                            targetInput = null
+                            clearTargetState()
                             state = State.IDLE
                             renderIdle()
                             // History and analytics count only text accepted by the original editor.
@@ -504,8 +658,7 @@ class BubbleAccessibilityService : AccessibilityService() {
                 if (sessions.isActive(session)) {
                     if (!retained) { activeFile = null; capturedContext = null }
                     if (state == State.PROCESSING) {
-                        target = null
-                        targetInput = null
+                        clearTargetState()
                         state = State.IDLE
                         renderIdle()
                     }
@@ -572,8 +725,7 @@ class BubbleAccessibilityService : AccessibilityService() {
         activeFile?.delete()
         activeFile = null
         retry = null
-        target = null
-        targetInput = null
+        clearTargetState()
         captureOwner = null
         capturedContext = null
         state = State.IDLE
@@ -581,17 +733,87 @@ class BubbleAccessibilityService : AccessibilityService() {
         renderIdle()
     }
 
+    private fun clearTargetState() {
+        if (Build.VERSION.SDK_INT >= 33) targetInput?.cancelBaseline()
+        target = null
+        targetNode = null
+        targetInput = null
+    }
+
+    private fun captureInitialContext(candidate: CaptureCandidate): DictationContext? {
+        if (Build.VERSION.SDK_INT >= 33 && candidate.inputTarget?.allowsContext == false) return null
+        if (candidate.editor != null) return candidate.editor.context(settings.contextLevel, settings.contextStyle)
+        if (Build.VERSION.SDK_INT >= 33 && candidate.inputTarget != null) {
+            // Avoid sending nearby text before async SurroundingText capture finishes; upgrade in processRecording.
+            val initialLevel = if (settings.contextLevel == ContextLevel.NEARBY) ContextLevel.APP else settings.contextLevel
+            return candidate.inputTarget.baselineContext(candidate.focusedNode, initialLevel, settings.contextStyle)
+        }
+        return null
+    }
+
+    private suspend fun commitInsertion(
+        editor: FocusedEditor?,
+        connection: BubbleInputMethod.Target?,
+        maxTextLength: Int?,
+        transcript: String,
+    ): BubbleCommitResult = if (Build.VERSION.SDK_INT >= 33 && connection != null) {
+        connection.insert(editor, transcript, maxTextLength, ::inputFocus)
+    } else if (editor != null) {
+        val focused = inputFocus()
+        withContext(Dispatchers.IO) {
+            if (editor.isWebContent()) BubbleCommitResult.UNSUPPORTED
+            else if (editor.insert(transcript, focused)) BubbleCommitResult.ACCEPTED else BubbleCommitResult.REJECTED
+        }
+    } else {
+        BubbleCommitResult.REJECTED
+    }
+
+    internal fun hasActiveInputConnectionForTest(): Boolean =
+        Build.VERSION.SDK_INT >= 33 && editorMethod?.activePackageName() != null
+
+    internal fun testCaptureAndInsert(transcript: String, onResult: (BubbleCommitResult) -> Unit) {
+        scope.launch {
+            val result = try {
+                val candidate = captureCandidate() ?: BubbleCommitResult.REJECTED.let { onResult(it); return@launch }
+                val editor = candidate.editor
+                val connection = candidate.inputTarget
+                if (editor == null && (Build.VERSION.SDK_INT < 33 || connection == null)) {
+                    onResult(BubbleCommitResult.REJECTED)
+                    return@launch
+                }
+                if (Build.VERSION.SDK_INT >= 33 && connection != null && editor == null) {
+                    connection.captureBaselineAsync(scope)
+                    connection.awaitBaseline(500)
+                }
+                committing = true
+                try {
+                    commitInsertion(
+                        editor = editor,
+                        connection = connection,
+                        maxTextLength = candidate.focusedNode?.maxTextLength?.takeIf { it >= 0 },
+                        transcript = transcript,
+                    )
+                } finally {
+                    committing = false
+                }
+            } catch (_: Exception) {
+                BubbleCommitResult.REJECTED
+            }
+            onResult(result)
+        }
+    }
+
     private fun renderIdle() = bubble?.render("Tap to speak", recording = false, processing = false)
 
     private fun showMessage(message: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
-        val focused = inputFocus()
-        val editor = FocusedEditor.capture(focused, nativeInput(focused) != null)
-        if (bubble == null || editor == null) {
+        val candidate = captureCandidate()
+        if (bubble == null || candidate == null) {
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
             return
         }
-        target = editor
-        targetInput = nativeInput(focused)
+        target = candidate.editor
+        targetNode = candidate.focusedNode
+        targetInput = candidate.inputTarget
         captureOwner = settings.accountId
         state = State.MESSAGE
         bubble?.renderMessage(message, actionLabel, onAction)

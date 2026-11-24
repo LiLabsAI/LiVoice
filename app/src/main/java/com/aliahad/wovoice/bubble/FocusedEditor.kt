@@ -21,7 +21,8 @@ internal class FocusedEditor private constructor(
     private val end: Int,
     private val usesInputConnection: Boolean,
 ) {
-    val packageName: String = node.packageName.toString()
+    val packageName: String = node.packageName?.toString().orEmpty()
+    val maxTextLength: Int get() = node.maxTextLength
     val sentenceStart: Boolean = TextCommitPolicy.isSentenceStartAfter(original.take(minOf(start, end)).takeLast(16))
 
     fun context(level: ContextLevel, style: String): DictationContext? {
@@ -43,7 +44,7 @@ internal class FocusedEditor private constructor(
 
     fun isWebContent(): Boolean {
         var ancestor: AccessibilityNodeInfo? = node
-        repeat(24) {
+        repeat(48) {
             val current = ancestor ?: return false
             if (current.className?.toString() == "android.webkit.WebView") return true
             ancestor = current.parent
@@ -99,15 +100,24 @@ internal class FocusedEditor private constructor(
     }
 
     companion object {
-        private fun textOf(node: AccessibilityNodeInfo): String =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && node.isShowingHintText) ""
-            else node.text?.toString().orEmpty()
+        private fun stateOf(node: AccessibilityNodeInfo): BubbleNodePolicy.NodeTextState {
+            val showingHint = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && node.isShowingHintText
+            val hint = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) node.hintText?.toString() else null
+            return BubbleNodePolicy.resolveNodeTextState(
+                rawText = node.text?.toString().orEmpty(),
+                showingHintText = showingHint,
+                hintText = hint,
+                selectionStart = node.textSelectionStart,
+                selectionEnd = node.textSelectionEnd,
+            )
+        }
 
-        private fun selectionOf(node: AccessibilityNodeInfo, text: String): Pair<Int, Int> =
-            // Android can omit selection offsets for an empty editor showing its hint.
-            // Its only possible insertion position is zero; missing offsets in nonempty text remain invalid.
-            if (text.isEmpty() && node.textSelectionStart == -1 && node.textSelectionEnd == -1) 0 to 0
-            else node.textSelectionStart to node.textSelectionEnd
+        private fun textOf(node: AccessibilityNodeInfo): String = stateOf(node).text
+
+        private fun selectionOf(node: AccessibilityNodeInfo, text: String): Pair<Int, Int> {
+            val resolved = stateOf(node)
+            return if (text.isEmpty() && resolved.text.isEmpty()) 0 to 0 else resolved.selectionStart to resolved.selectionEnd
+        }
 
         fun isSupported(node: AccessibilityNodeInfo, inputConnectionAvailable: Boolean = false): Boolean = node.isEditable && node.isEnabled &&
             node.isFocused && node.isVisibleToUser && !node.isPassword && !EditorPolicy.isSensitive(node.inputType) &&
@@ -115,11 +125,10 @@ internal class FocusedEditor private constructor(
 
         fun capture(node: AccessibilityNodeInfo?, inputConnectionAvailable: Boolean = false): FocusedEditor? {
             if (node == null || !isSupported(node, inputConnectionAvailable)) return null
-            val text = textOf(node)
-            val (start, end) = selectionOf(node, text)
-            if (start !in 0..text.length || end !in 0..text.length) return null
-            val styled = if (text.isEmpty()) "" else SpannedString(node.text ?: "")
-            return FocusedEditor(node, text, styled, start, end, inputConnectionAvailable)
+            val resolved = stateOf(node)
+            if (!resolved.hasValidSelection) return null
+            val styled = if (resolved.text.isEmpty()) "" else SpannedString(node.text ?: "")
+            return FocusedEditor(node, resolved.text, styled, resolved.selectionStart, resolved.selectionEnd, inputConnectionAvailable)
         }
     }
 }

@@ -180,7 +180,7 @@ internal class DictationBubbleView(
         messageAction = null
         val mode = when { recording -> Mode.RECORDING; processing -> Mode.PROCESSING; else -> Mode.IDLE }
         show(Display(mode))
-        if (recording || processing) {
+        if ((recording || processing) && text.isNotBlank()) {
             control.contentDescription = "${control.contentDescription}. $text"
             if (Build.VERSION.SDK_INT >= 26) control.tooltipText = text
         } else if (Build.VERSION.SDK_INT >= 26) control.tooltipText = null

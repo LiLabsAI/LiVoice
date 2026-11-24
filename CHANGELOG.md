@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.9.1 — 2026-11-24
+
+- Fixed Android floating dictation bubble failing with `"Select a text box first."` in WhatsApp (`MentionableEntry`) and similar custom `EditText` fields that expose placeholder text without setting `hintText` / `isShowingHintText` or node selection offsets.
+- Upgraded `BubbleAccessibilityService` focus discovery across active application windows, added `AccessibilityService.InputMethod` (`SurroundingText` / `commitText`) fallback for custom Android 13+ editors alongside node-action edits, and prevented blank-text dictation states from mislabeling accessibility controls.
+
 ## 1.9.0 — 2026-11-14 (Desktop 1.3.0)
 
 - Rebranded Android, macOS Desktop, Worker web pages, Admin portal, and documentation from WoVoice to **LiVoice**, with a new logo mark, app/adaptive icons, tray templates, and keyboard toolbar emblem.
