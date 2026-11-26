@@ -398,7 +398,7 @@ async function serviceStatus(env: AppEnv): Promise<Response> {
         transcription,
         quota,
       },
-      documentation: "https://github.com/LiLabsAI/LiVoice",
+      documentation: "https://github.com/aliahadmd/LiVoice",
       authentication: "Passwordless LiVoice account required for protected endpoints",
     },
     { status: database === "degraded" ? 503 : 200 },

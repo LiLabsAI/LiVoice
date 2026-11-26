@@ -1,6 +1,6 @@
 # Contributing to LiVoice
 
-Contributions, bug reports, forks, and pull requests are welcome on [GitHub](https://github.com/LiLabsAI/LiVoice).
+Contributions, bug reports, forks, and pull requests are welcome on [GitHub](https://github.com/aliahadmd/LiVoice).
 
 ## Reporting Issues
 

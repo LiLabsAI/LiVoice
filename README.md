@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/LiLabsAI/LiVoice/releases"><strong>Download LiVoice</strong></a>
+  <a href="https://github.com/aliahadmd/LiVoice/releases"><strong>Download LiVoice</strong></a>
   ·
   <a href="https://wovoice.aliahad.com/status"><strong>Service status</strong></a>
   ·
@@ -94,7 +94,7 @@ Works on Android 7.0 and later.
 
 ### Install
 
-1. On your phone, open the [Releases page](https://github.com/LiLabsAI/LiVoice/releases) and download the newest **LiVoice `.apk`** file.
+1. On your phone, open the [Releases page](https://github.com/aliahadmd/LiVoice/releases) and download the newest **LiVoice `.apk`** file.
 2. Open the downloaded file. If Android asks, allow your browser to **install unknown apps**, then tap **Install**.
 
 ### Set up (about one minute)
@@ -245,7 +245,7 @@ Hold a key, speak, release — the text appears wherever your cursor is, in any 
 
 ### Install
 
-1. Open the [Releases page](https://github.com/LiLabsAI/LiVoice/releases), find the newest **LiVoice Desktop** release, and download the `livoice-desktop-….dmg` file.
+1. Open the [Releases page](https://github.com/aliahadmd/LiVoice/releases), find the newest **LiVoice Desktop** release, and download the `livoice-desktop-….dmg` file.
 2. Open it and drag **LiVoice** into your **Applications** folder.
 3. Open LiVoice from Applications.
 
@@ -463,7 +463,7 @@ Copyright (C) 2026 Ali Ahad.
 
 **LiVoice** is free and open-source software licensed under the **GNU General Public License v3.0 (`GPL-3.0`)**.
 
-- **Study, fork, and contribute:** You are free to study the code, fork this repository, modify it, build from source, and share improvements via pull requests on [GitHub](https://github.com/LiLabsAI/LiVoice).
+- **Study, fork, and contribute:** You are free to study the code, fork this repository, modify it, build from source, and share improvements via pull requests on [GitHub](https://github.com/aliahadmd/LiVoice).
 - **Copyleft protection:** Any distributed modified version or derivative work must also be licensed under the **GNU General Public License v3.0** with full source availability. Incorporating LiVoice code into distributed closed-source proprietary software is not permitted.
 - **Ownership & attribution:** Original authorship and copyright remain with **Ali Ahad**. Redistributions and forks must preserve original copyright notices, attribution notices, [LICENSE](LICENSE), and [NOTICE](NOTICE).
 

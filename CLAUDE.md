@@ -4,7 +4,7 @@ This file provides guidance to coding agents when working with code in this repo
 
 ## What this is
 
-LiVoice is a speech-first dictation product (formerly WoVoice; repository `LiLabsAI/LiVoice`) with three client apps around one Cloudflare Worker backend:
+LiVoice is a speech-first dictation product (formerly WoVoice; repository `aliahadmd/LiVoice`) with three client apps around one Cloudflare Worker backend:
 
 | Part | Path | Stack |
 | --- | --- | --- |

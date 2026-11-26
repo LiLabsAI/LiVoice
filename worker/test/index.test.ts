@@ -868,17 +868,17 @@ describe("usage estimates", () => {
 describe("download links", () => {
   // Newest first, as GitHub publishes it; drafts never appear in the feed.
   const feed = `<feed>
-    <entry><link rel="alternate" type="text/html" href="https://github.com/LiLabsAI/LiVoice/releases/tag/v1.6.0"/></entry>
-    <entry><link rel="alternate" type="text/html" href="https://github.com/LiLabsAI/LiVoice/releases/tag/nightly-2026-10-01"/></entry>
-    <entry><link rel="alternate" type="text/html" href="https://github.com/LiLabsAI/LiVoice/releases/tag/desktop-v1.1.0"/></entry>
-    <entry><link rel="alternate" type="text/html" href="https://github.com/LiLabsAI/LiVoice/releases/tag/v1.5.1"/></entry>
-    <entry><link rel="alternate" type="text/html" href="https://github.com/LiLabsAI/LiVoice/releases/tag/desktop-v1.0.1"/></entry>
+    <entry><link rel="alternate" type="text/html" href="https://github.com/aliahadmd/LiVoice/releases/tag/v1.6.0"/></entry>
+    <entry><link rel="alternate" type="text/html" href="https://github.com/aliahadmd/LiVoice/releases/tag/nightly-2026-10-01"/></entry>
+    <entry><link rel="alternate" type="text/html" href="https://github.com/aliahadmd/LiVoice/releases/tag/desktop-v1.1.0"/></entry>
+    <entry><link rel="alternate" type="text/html" href="https://github.com/aliahadmd/LiVoice/releases/tag/v1.5.1"/></entry>
+    <entry><link rel="alternate" type="text/html" href="https://github.com/aliahadmd/LiVoice/releases/tag/desktop-v1.0.1"/></entry>
   </feed>`;
 
   // The feed is a factory: a Response body can be read only once.
   function downloadHandler(feedResponse?: () => Response, cache: Cache | null = null) {
     const fetchMock = vi.fn(async (input: string) => {
-      if (input === "https://github.com/LiLabsAI/LiVoice/releases.atom") {
+      if (input === "https://github.com/aliahadmd/LiVoice/releases.atom") {
         return feedResponse?.() ?? new Response("down", { status: 503 });
       }
       throw new Error(`unexpected fetch ${input}`);
@@ -900,10 +900,10 @@ describe("download links", () => {
     const android = await handler(new Request("https://wovoice.aliahad.com/download/android"), fakeEnv());
     expect(mac.status).toBe(302);
     expect(mac.headers.get("location")).toBe(
-      "https://github.com/LiLabsAI/LiVoice/releases/download/desktop-v1.1.0/livoice-desktop-1.1.0.dmg",
+      "https://github.com/aliahadmd/LiVoice/releases/download/desktop-v1.1.0/livoice-desktop-1.1.0.dmg",
     );
     expect(android.headers.get("location")).toBe(
-      "https://github.com/LiLabsAI/LiVoice/releases/download/v1.6.0/LiVoice-1.6.0.apk",
+      "https://github.com/aliahadmd/LiVoice/releases/download/v1.6.0/LiVoice-1.6.0.apk",
     );
     expect(fetchMock.mock.calls.every(([input]) => !String(input).includes("api.github.com"))).toBe(true);
   });
@@ -915,7 +915,7 @@ describe("download links", () => {
     expect(await response.json()).toMatchObject({
       mac: { version: "1.1.0" },
       android: { version: "1.6.0" },
-      releasesUrl: "https://github.com/LiLabsAI/LiVoice/releases",
+      releasesUrl: "https://github.com/aliahadmd/LiVoice/releases",
     });
   });
 
@@ -924,7 +924,7 @@ describe("download links", () => {
     const { handler, fetchMock } = downloadHandler(undefined, cache);
     const first = await handler(new Request("https://wovoice.aliahad.com/download/android"), fakeEnv());
     expect(first.status).toBe(302);
-    expect(first.headers.get("location")).toBe("https://github.com/LiLabsAI/LiVoice/releases");
+    expect(first.headers.get("location")).toBe("https://github.com/aliahadmd/LiVoice/releases");
     await handler(new Request("https://wovoice.aliahad.com/download/android"), fakeEnv());
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -1802,12 +1802,12 @@ describe("audit remediation regressions", () => {
   it("ignores /releases/tag/ links inside Atom <content> body HTML", async () => {
     const feedWithContentLinks = `<feed>
       <entry>
-        <link rel="alternate" type="text/html" href="https://github.com/LiLabsAI/LiVoice/releases/tag/v1.7.0"/>
-        <content type="html">Compared against &lt;a href="https://github.com/LiLabsAI/LiVoice/releases/tag/desktop-v9.9.9"&gt;fake&lt;/a&gt; and <a href="https://github.com/LiLabsAI/LiVoice/releases/tag/desktop-v8.8.8">fake2</a></content>
+        <link rel="alternate" type="text/html" href="https://github.com/aliahadmd/LiVoice/releases/tag/v1.7.0"/>
+        <content type="html">Compared against &lt;a href="https://github.com/aliahadmd/LiVoice/releases/tag/desktop-v9.9.9"&gt;fake&lt;/a&gt; and <a href="https://github.com/aliahadmd/LiVoice/releases/tag/desktop-v8.8.8">fake2</a></content>
       </entry>
       <entry>
-        <link rel="alternate" type="text/html" href="https://github.com/LiLabsAI/LiVoice/releases/tag/desktop-v1.2.0"/>
-        <content type="html">Notes mentioning https://github.com/LiLabsAI/LiVoice/releases/tag/v9.9.9</content>
+        <link rel="alternate" type="text/html" href="https://github.com/aliahadmd/LiVoice/releases/tag/desktop-v1.2.0"/>
+        <content type="html">Notes mentioning https://github.com/aliahadmd/LiVoice/releases/tag/v9.9.9</content>
       </entry>
     </feed>`;
     const fetchMock = vi.fn(async () => new Response(feedWithContentLinks));

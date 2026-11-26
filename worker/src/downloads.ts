@@ -9,10 +9,10 @@
  * on the Releases page instead of a broken link.
  */
 
-const REPOSITORY = "LiLabsAI/LiVoice";
+const REPOSITORY = "aliahadmd/LiVoice";
 const RELEASES_PAGE = `https://github.com/${REPOSITORY}/releases`;
 const ASSET_PREFIX = `https://github.com/${REPOSITORY}/releases/download/`;
-const CACHE_KEY = "https://wovoice.aliahad.com/__cache/github-releases-v3";
+const CACHE_KEY = "https://wovoice.aliahad.com/__cache/github-releases-v4";
 const CACHE_SECONDS = 600;
 const LINK_MAX_AGE_SECONDS = 300;
 
