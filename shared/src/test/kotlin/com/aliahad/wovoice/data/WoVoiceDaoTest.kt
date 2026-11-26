@@ -122,6 +122,144 @@ class WoVoiceDaoTest {
         assertFalse(dao.unsyncedAnalytics(ACCOUNT, 10).isEmpty())
     }
 
+    @Test
+    fun assignUnassignedHandlesDictionaryConflictsAndMigratesDailyUsageKeys() = runBlocking {
+        // Account already has "kubernetes" and an existing prefixed daily_usage row.
+        dao.insertDictionary(term("owned-1", "Kubernetes", syncState = SYNCED, syncVersion = 2))
+        val existingKey = "$ACCOUNT|2026-08-04|UTC"
+        dao.upsertUsage(
+            DailyUsageAggregate(
+                dateKey = existingKey,
+                localDate = "2026-08-04",
+                zoneId = "UTC",
+                firstEventAtMs = 2_000,
+                lastEventAtMs = 3_000,
+                dictationCount = 2,
+                audioDurationMs = 4_000,
+                wordCount = 10,
+                processingTotalMs = 900,
+                processingSamplesMs = "400,500",
+                polishedCount = 1,
+                correctionCount = 1,
+                asrNeurons = 2.0,
+                polishNeurons = 1.0,
+                totalNeurons = 3.0,
+                estimatedCostUsd = 0.002,
+                ownerAccountId = ACCOUNT,
+            ),
+        )
+
+        // Legacy unassigned data: colliding "Kubernetes", duplicate unassigned "Cloudflare" (suggested vs confirmed),
+        // one unique term "Antigravity", one overlapping daily_usage row, and one non-overlapping legacy day.
+        dao.insertDictionary(term("", "Kubernetes", syncState = SYNC_LOCAL).copy(ownerAccountId = null))
+        dao.insertDictionary(
+            term("", "Cloudflare", syncState = SYNC_LOCAL)
+                .copy(ownerAccountId = null, status = DictionaryEntry.STATUS_SUGGESTED, useCount = 1),
+        )
+        dao.insertDictionary(
+            term("", "Cloudflare", syncState = SYNC_LOCAL)
+                .copy(ownerAccountId = null, status = DictionaryEntry.STATUS_CONFIRMED, useCount = 5),
+        )
+        dao.insertDictionary(term("", "Antigravity", syncState = SYNC_LOCAL).copy(ownerAccountId = null))
+        dao.upsertUsage(
+            DailyUsageAggregate(
+                dateKey = "2026-08-04|UTC",
+                localDate = "2026-08-04",
+                zoneId = "UTC",
+                firstEventAtMs = 1_000,
+                lastEventAtMs = 4_000,
+                dictationCount = 3,
+                audioDurationMs = 6_000,
+                wordCount = 15,
+                processingTotalMs = 1_100,
+                processingSamplesMs = "300,800",
+                polishedCount = 2,
+                correctionCount = 0,
+                asrNeurons = 1.5,
+                polishNeurons = 0.5,
+                totalNeurons = 2.0,
+                estimatedCostUsd = 0.001,
+                ownerAccountId = null,
+            ),
+        )
+        dao.upsertUsage(
+            DailyUsageAggregate(
+                dateKey = "2026-08-03|UTC",
+                localDate = "2026-08-03",
+                zoneId = "UTC",
+                firstEventAtMs = 500,
+                lastEventAtMs = 500,
+                dictationCount = 1,
+                audioDurationMs = 1_000,
+                wordCount = 4,
+                processingTotalMs = 250,
+                processingSamplesMs = "250",
+                polishedCount = 1,
+                correctionCount = 0,
+                asrNeurons = 0.5,
+                polishNeurons = 0.2,
+                totalNeurons = 0.7,
+                estimatedCostUsd = 0.0005,
+                ownerAccountId = null,
+            ),
+        )
+
+        dao.assignUnassigned(ACCOUNT)
+
+        assertEquals(0, dao.unassignedCount())
+        val confirmed = dao.dictionary(ACCOUNT, DictionaryEntry.STATUS_CONFIRMED, "").map { it.term }.toSet()
+        assertEquals(setOf("Kubernetes", "Cloudflare", "Antigravity"), confirmed)
+        // Original synced "Kubernetes" was preserved intact.
+        assertEquals("owned-1", dao.dictionaryByNormalized(ACCOUNT, "kubernetes")!!.syncId)
+        assertTrue(dao.dictionaryByNormalized(ACCOUNT, "cloudflare")!!.isConfirmed)
+        assertTrue(dao.dictionaryByNormalized(ACCOUNT, "antigravity")!!.syncId.isNotBlank())
+
+        // Legacy daily_usage rows were re-keyed and merged cleanly.
+        assertNull(dao.dailyUsage("2026-08-04|UTC", null))
+        val mergedDay = dao.dailyUsage(existingKey, ACCOUNT)!!
+        assertEquals(5L, mergedDay.dictationCount)
+        assertEquals(10_000L, mergedDay.audioDurationMs)
+        assertEquals(25L, mergedDay.wordCount)
+        assertEquals(1_000L, mergedDay.firstEventAtMs)
+        assertEquals(4_000L, mergedDay.lastEventAtMs)
+        assertEquals(3L, mergedDay.polishedCount)
+        assertEquals(1L, mergedDay.correctionCount)
+        val migratedDay = dao.dailyUsage("$ACCOUNT|2026-08-03|UTC", ACCOUNT)!!
+        assertEquals(1L, migratedDay.dictationCount)
+    }
+
+    @Test
+    fun deletingOrClearingSuggestedDictionaryEntriesNeverQueuesCloudTombstones() = runBlocking {
+        val settings = FakeSettings()
+        val repository = WoVoiceRepository(dao, settings)
+        assertTrue(repository.addManualTerm("ConfirmedOne"))
+        assertTrue(repository.addSuggestion("SuggestedOne"))
+        assertTrue(repository.addSuggestion("SuggestedTwo"))
+
+        val suggestedOne = repository.dictionary(confirmed = false).first { it.term == "SuggestedOne" }
+        repository.deleteDictionary(suggestedOne)
+        assertTrue(dao.outbox(ACCOUNT, 10).isEmpty())
+
+        repository.clearDictionary()
+        val tombstones = dao.outbox(ACCOUNT, 10)
+        assertEquals(1, tombstones.size)
+        assertEquals("dictionary", tombstones.single().recordType)
+        assertTrue(repository.dictionary(confirmed = true).isEmpty())
+        assertTrue(repository.dictionary(confirmed = false).isEmpty())
+    }
+
+    @Test
+    fun offlineHistoryReadAppliesCachedRetention() = runBlocking {
+        val now = 2_000_000_000_000L
+        val settings = FakeSettings().apply { historyRetentionDays = 7 }
+        val repository = WoVoiceRepository(dao, settings, clock = { now })
+        dao.insertRecord(record("old").copy(createdAtMs = now - 10 * 86_400_000L, finalText = "Expired"))
+        dao.insertRecord(record("fresh").copy(createdAtMs = now - 2 * 86_400_000L, finalText = "Kept"))
+
+        val history = repository.history()
+        assertEquals(listOf("Kept"), history.map(DictationRecord::finalText))
+    }
+
     private fun record(syncId: String) = DictationRecord(
         requestId = syncId,
         finalText = "Hello.",

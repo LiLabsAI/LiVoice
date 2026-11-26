@@ -29,7 +29,7 @@ public struct APIClient: Sendable {
         }
         request.httpMethod = method; request.httpBody = body; request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("WoVoice-iOS/1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("LiVoice-iOS/1.0", forHTTPHeaderField: "User-Agent")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if body != nil { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         let data: Data; let response: URLResponse
@@ -53,13 +53,26 @@ public struct APIClient: Sendable {
     public func refresh(_ token: String) async throws -> Tokens {
         try await request("/v1/auth/refresh", method: "POST", body: JSONEncoder().encode(["refreshToken": token]))
     }
+    public static func boundGlossary(_ glossary: [String], maxItems: Int = 100, maxChars: Int = 4_000) -> [String] {
+        var result: [String] = []
+        var totalChars = 0
+        for raw in glossary {
+            let term = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !term.isEmpty, term.utf16.count <= 80 else { continue }
+            let extra = (result.isEmpty ? 0 : 1) + term.utf16.count
+            if result.count >= maxItems || totalChars + extra > maxChars { break }
+            result.append(term)
+            totalChars += extra
+        }
+        return result
+    }
     public func transcribe(token: String, wav: Data, glossary: [String], context: DictationContext?, sentenceStart: Bool) async throws -> Transcription {
         struct Options: Encodable { let locale = "en-IN"; let polish = "light"; let commands = ["new_line", "new_paragraph"]; let sentenceStart: Bool; let glossary: [String]; let context: DictationContext? }
-        let boundary = "WoVoice-\(UUID().uuidString)"
+        let boundary = "LiVoice-\(UUID().uuidString)"
         var body = Data()
         func append(_ text: String) { body.append(contentsOf: text.utf8) }
         append("--\(boundary)\r\nContent-Disposition: form-data; name=\"options\"\r\n\r\n")
-        body.append(try JSONEncoder().encode(Options(sentenceStart: sentenceStart, glossary: Array(glossary.prefix(100)), context: context)))
+        body.append(try JSONEncoder().encode(Options(sentenceStart: sentenceStart, glossary: Self.boundGlossary(glossary), context: context)))
         append("\r\n--\(boundary)\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"voice.wav\"\r\nContent-Type: audio/wav\r\n\r\n")
         body.append(wav); append("\r\n--\(boundary)--\r\n")
         let data = try await send("/v1/transcriptions", method: "POST", token: token, body: body, timeout: 90, contentType: "multipart/form-data; boundary=\(boundary)")

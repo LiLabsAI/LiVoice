@@ -336,8 +336,8 @@ Synced data is stored encrypted, with a key unique to your account.
 LiVoice is built to collect as little as possible.
 
 - **Your voice is never stored.** Recordings are used only to produce your text and are deleted straight away — after success, failure, or cancellation.
-- **Only what you dictate is processed.** The text around your cursor, your clipboard, your contacts, what you type by hand, and the name of the app you're using are never sent.
-- **Passwords are safe.** Voice is turned off in password and PIN fields on Android.
+- **Only what you dictate is processed by default.** Your clipboard, your contacts, what you type by hand, and the name of the app you're using are never sent. Optional Automatic Context is off by default — surrounding cursor text (up to 512 characters before and 128 after the cursor) is only sent if you separately enable **Nearby text** in Settings, and is never saved in History or cloud sync.
+- **Passwords are safe.** Voice and context capture are turned off in password fields on Android, macOS, and iOS.
 - **Your Dictionary stays yours.** Only terms you've approved are used to improve recognition.
 - **Your synced data is encrypted** with a key unique to your account. LiVoice's support staff never see the contents of your History or Dictionary.
 - **No ads, no tracking, no crash-reporting tools.**

@@ -4,10 +4,21 @@ import { join } from 'path'
 
 export type Trigger = 'keyboard' | 'middle-click'
 
-interface TriggerSettings {
+export interface TriggerSettings {
   keyboardShortcutEnabled: boolean
   middleClickEnabled: boolean
   triggerKey: string
+}
+
+export interface TriggerEngineOptions {
+  /** Called when a modifier trigger turns out to be a keyboard shortcut (e.g. Opt+Left, Cmd+C). */
+  onCancel?: () => void
+  /** Called when a quick tap transitions recording into latch mode. */
+  onLatch?: (hint: string) => void
+  /** Returns true while dictation is actively recording or processing. */
+  isBusy?: () => boolean
+  /** Injectable clock for unit tests. */
+  now?: () => number
 }
 
 // Raw macOS virtual keycodes (kVK_*) for each selectable trigger key.
@@ -41,7 +52,13 @@ const TRIGGER_KEY_LABELS: Record<string, string> = {
 /** What ends a recording started by `trigger`, for the overlay's hint line. */
 export function releaseHint(trigger: Trigger, triggerKey: string): string {
   if (trigger === 'middle-click') return 'Release the middle button'
+  if (triggerKey === 'caps-lock') return `Tap ${TRIGGER_KEY_LABELS[triggerKey]} again`
   return `Release ${TRIGGER_KEY_LABELS[triggerKey] ?? '⌥'}`
+}
+
+/** Overlay hint shown after a quick tap switches recording into hands-free latch mode. */
+export function latchHint(triggerKey: string): string {
+  return `Tap ${TRIGGER_KEY_LABELS[triggerKey] ?? '⌥'} again`
 }
 
 // CGEvent mouse button number for the center/middle button.
@@ -52,15 +69,19 @@ const MOUSE_MIDDLE = 2
  * hold the configured trigger key to dictate, quick-tap to latch (start; tap
  * again to stop), and hold middle-click for the same. Runs as a child process
  * so macOS's tap-timeout disablement can never silently kill dictation — the
- * helper re-enables its own tap. Needs only the Accessibility (Device Control
- * & Data Access) grant; events are not suppressed.
+ * helper re-enables its own tap. Needs only the Accessibility permission;
+ * events are not suppressed.
  */
 export class TriggerEngine {
   private lock = false
+  private activeTrigger: Trigger | null = null
   private keyDownAt = 0
   private keyboardLatched = false
   private triggerDown = false
   private latchStopPress = false
+  private ignoredPress = false
+  private comboCancelled = false
+  private paused = false
   private helper: ChildProcess | null = null
   private activeCodes: number[] = []
   private pendingLine = ''
@@ -68,23 +89,58 @@ export class TriggerEngine {
   constructor(
     private readonly settings: TriggerSettings,
     private readonly onStart: (trigger: Trigger) => void,
-    private readonly onStop: (trigger: Trigger) => void
-  ) {}
+    private readonly onStop: (trigger: Trigger) => void,
+    private readonly options: TriggerEngineOptions = {}
+  ) {
+    this.activeCodes = this.codes()
+  }
+
+  private now(): number {
+    return this.options.now?.() ?? Date.now()
+  }
 
   private codes(): number[] {
     const preset = TRIGGER_KEY_CODES[this.settings.triggerKey] ?? TRIGGER_KEY_CODES.option
     return [...preset]
   }
 
+  private shouldRun(): boolean {
+    return (
+      !this.paused && (this.settings.keyboardShortcutEnabled || this.settings.middleClickEnabled)
+    )
+  }
+
   private helperPath(): string {
-    const packaged = join(process.resourcesPath, 'tapd')
-    if (existsSync(packaged)) return packaged
+    const packaged = join(process.resourcesPath ?? '', 'tapd')
+    if (process.resourcesPath && existsSync(packaged)) return packaged
     return join(__dirname, '../../native/tapd')
   }
 
+  isPaused(): boolean {
+    return this.paused
+  }
+
+  setPaused(paused: boolean): void {
+    this.paused = paused
+    this.syncRegistration()
+  }
+
+  /** Starts tapd if any trigger is active and unpaused; stops it cleanly otherwise. */
+  syncRegistration(): void {
+    if (!this.shouldRun()) {
+      this.unregister()
+      return
+    }
+    this.registerIfMissing()
+  }
+
   register(): void {
-    if (this.helper !== null) return
     this.activeCodes = this.codes()
+    if (!this.shouldRun()) {
+      this.unregister()
+      return
+    }
+    if (this.helper !== null) return
     try {
       const child = spawn(this.helperPath(), this.activeCodes.map(String), {
         stdio: ['pipe', 'pipe', 'pipe']
@@ -92,15 +148,10 @@ export class TriggerEngine {
       child.stdout?.setEncoding('utf-8')
       this.pendingLine = ''
       child.stdout?.on('data', (chunk: string) => {
-        // A pipe read can end mid-line; a split "k 58 " + "1" used to parse as a
-        // key-up (stopping the session) and drop the key-down that followed.
+        // A pipe read can end mid-line; buffer incomplete lines across chunks.
         const lines = (this.pendingLine + chunk).split('\n')
         this.pendingLine = lines.pop() ?? ''
-        for (const line of lines) {
-          const [kind, value, state] = line.trim().split(' ')
-          if (kind === 'k') this.onKeyLine(Number(value), state === '1')
-          else if (kind === 'm') this.onMouseLine(Number(value), state === '1')
-        }
+        for (const line of lines) this.processLine(line)
       })
       child.stderr?.on('data', (chunk: Buffer) => {
         const text = chunk.toString().trim()
@@ -112,9 +163,6 @@ export class TriggerEngine {
           console.log('[trigger] tapd exited with code', code)
         }
       })
-      // spawn() reports ENOENT/permissions failures asynchronously — without
-      // this listener the error throws in the main process and isRegistered()
-      // would keep reporting a healthy helper that never ran.
       child.on('error', (error) => {
         if (this.helper === child) this.helper = null
         console.error('[trigger] tapd failed to run:', error)
@@ -127,6 +175,16 @@ export class TriggerEngine {
     }
   }
 
+  /** Exposed for deterministic unit tests and stdout line dispatch. */
+  processLine(line: string): void {
+    const trimmed = line.trim()
+    if (trimmed.length === 0) return
+    const [kind, value, state] = trimmed.split(' ')
+    if (kind === 'k') this.onKeyLine(Number(value), state === '1')
+    else if (kind === 'm') this.onMouseLine(Number(value), state === '1')
+    else if (kind === 'c') this.onComboKey()
+  }
+
   restart(): void {
     this.unregister()
     this.register()
@@ -137,6 +195,7 @@ export class TriggerEngine {
   }
 
   registerIfMissing(): void {
+    if (!this.shouldRun()) return
     if (!this.isRegistered()) this.register()
   }
 
@@ -157,7 +216,10 @@ export class TriggerEngine {
    */
   reset(): void {
     this.lock = false
+    this.activeTrigger = null
     this.keyboardLatched = false
+    this.comboCancelled = false
+    this.ignoredPress = false
     this.latchStopPress = this.triggerDown
   }
 
@@ -171,38 +233,58 @@ export class TriggerEngine {
     else this.onMouseUp(button)
   }
 
+  private onComboKey(): void {
+    if (!this.triggerDown || this.paused) return
+    this.comboCancelled = true
+    if (this.lock && this.activeTrigger === 'keyboard' && !this.keyboardLatched) {
+      this.lock = false
+      this.activeTrigger = null
+      this.options.onCancel?.()
+    }
+  }
+
   private tryStart(trigger: Trigger): boolean {
-    if (this.lock) return false
+    if (this.paused || this.lock || this.options.isBusy?.()) return false
     this.lock = true
+    this.activeTrigger = trigger
     this.onStart(trigger)
     return true
   }
 
   private tryStop(trigger: Trigger): boolean {
-    if (!this.lock) return false
+    if (!this.lock || this.activeTrigger !== trigger) return false
     this.lock = false
+    this.activeTrigger = null
     this.onStop(trigger)
     return true
   }
 
   private onKeyDown(keycode: number): void {
-    if (!this.settings.keyboardShortcutEnabled || !this.activeCodes.includes(keycode)) {
+    if (
+      this.paused ||
+      !this.settings.keyboardShortcutEnabled ||
+      !this.activeCodes.includes(keycode)
+    ) {
       return
     }
-    // Key auto-repeat fires extra keydowns while the key is held: only the
-    // first one opens a session, so the last repeat can't be mistaken for a
-    // quick tap at release time.
     if (this.triggerDown) return
     this.triggerDown = true
+    this.comboCancelled = false
+    this.ignoredPress = false
+
     if (this.keyboardLatched) {
       this.keyboardLatched = false
-      // This press IS the stop tap — its keyup must not start a new latch.
       this.latchStopPress = true
       this.tryStop('keyboard')
       return
     }
-    this.keyDownAt = Date.now()
-    this.tryStart('keyboard')
+
+    this.keyDownAt = this.now()
+    if (!this.tryStart('keyboard')) {
+      // Dictation was busy (e.g. processing) or another trigger owns the lock —
+      // ignore this key press completely so its release cannot enter phantom latch.
+      this.ignoredPress = true
+    }
   }
 
   private onKeyUp(keycode: number): void {
@@ -211,23 +293,34 @@ export class TriggerEngine {
     }
     if (!this.triggerDown) return
     this.triggerDown = false
+
+    if (this.comboCancelled) {
+      this.comboCancelled = false
+      return
+    }
+    if (this.ignoredPress) {
+      this.ignoredPress = false
+      return
+    }
     if (this.keyboardLatched) return
     if (this.latchStopPress) {
-      // Releasing the tap that stopped a latched session — do nothing.
       this.latchStopPress = false
       return
     }
-    const held = Date.now() - this.keyDownAt
+    if (!this.lock || this.activeTrigger !== 'keyboard') return
+
+    const held = this.now() - this.keyDownAt
     if (held < 300) {
       // Quick tap: keep recording in latch mode until the next tap.
       this.keyboardLatched = true
+      this.options.onLatch?.(latchHint(this.settings.triggerKey))
     } else {
       this.tryStop('keyboard')
     }
   }
 
   private onMouseDown(button: number): void {
-    if (!this.settings.middleClickEnabled || button !== MOUSE_MIDDLE) return
+    if (this.paused || !this.settings.middleClickEnabled || button !== MOUSE_MIDDLE) return
     this.tryStart('middle-click')
   }
 

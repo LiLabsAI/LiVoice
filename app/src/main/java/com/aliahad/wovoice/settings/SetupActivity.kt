@@ -2,17 +2,18 @@ package com.aliahad.wovoice.settings
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.net.Uri
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -20,6 +21,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
+import android.text.TextUtils
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
@@ -33,6 +35,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.content.ContextCompat
@@ -42,14 +45,19 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.aliahad.wovoice.context.ContextLevel
-import com.aliahad.wovoice.context.ContextPolicy
 import com.aliahad.wovoice.R
 import com.aliahad.wovoice.account.AccountResult
 import com.aliahad.wovoice.account.AccountState
 import com.aliahad.wovoice.account.DeviceSession
 import com.aliahad.wovoice.account.SessionManager
+import com.aliahad.wovoice.background.BackgroundCheckKey
+import com.aliahad.wovoice.background.BackgroundReliability
+import com.aliahad.wovoice.background.BubbleHealthJobService
+import com.aliahad.wovoice.background.HyperOS
 import com.aliahad.wovoice.bubble.BubbleAccessibilityService
+import com.aliahad.wovoice.bubble.BubbleKeepAliveService
+import com.aliahad.wovoice.context.ContextLevel
+import com.aliahad.wovoice.context.ContextPolicy
 import com.aliahad.wovoice.dashboard.DictionaryAdapter
 import com.aliahad.wovoice.dashboard.HistoryAdapter
 import com.aliahad.wovoice.dashboard.HistoryRow
@@ -63,11 +71,13 @@ import com.aliahad.wovoice.sync.SyncCoordinator
 import com.aliahad.wovoice.sync.SyncResult
 import com.aliahad.wovoice.ui.dp
 import com.aliahad.wovoice.ui.rounded
+import com.aliahad.wovoice.ui.setButtonAccessibilityRole
 import com.aliahad.wovoice.ui.styleText
+import com.aliahad.wovoice.ui.systemAnimationsEnabled
 import com.google.android.material.bottomnavigation.BottomNavigationView
-import com.google.android.material.navigation.NavigationBarView
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.navigation.NavigationBarView
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.switchmaterial.SwitchMaterial
 import kotlinx.coroutines.CoroutineScope
@@ -102,24 +112,26 @@ class SetupActivity : AppCompatActivity() {
     private var dictionaryJob: Job? = null
 
     private val metricViews = mutableMapOf<String, TextView>()
-    private lateinit var readinessText: TextView
-    private lateinit var aiInsightsText: TextView
-    private lateinit var usageTotalText: TextView
-    private lateinit var usageBreakdownText: TextView
-    private lateinit var recentContainer: LinearLayout
-    private lateinit var periodSelector: LinearLayout
+    private var readinessText: TextView? = null
+    private var backgroundWarningCard: View? = null
+    private var backgroundWarningText: TextView? = null
+    private var aiInsightsText: TextView? = null
+    private var usageTotalText: TextView? = null
+    private var usageBreakdownText: TextView? = null
+    private var recentContainer: LinearLayout? = null
+    private var periodSelector: LinearLayout? = null
 
-    private lateinit var historyAdapter: HistoryAdapter
-    private lateinit var historyEmpty: TextView
-    private lateinit var historySearch: EditText
-    private lateinit var historyRecycler: RecyclerView
+    private var historyAdapter: HistoryAdapter? = null
+    private var historyEmpty: TextView? = null
+    private var historySearch: EditText? = null
+    private var historyRecycler: RecyclerView? = null
 
     private var dictionaryConfirmed = true
-    private lateinit var dictionaryAdapter: DictionaryAdapter
-    private lateinit var dictionaryEmpty: TextView
-    private lateinit var dictionarySearch: EditText
-    private lateinit var dictionaryRecycler: RecyclerView
-    private lateinit var dictionaryTabs: LinearLayout
+    private var dictionaryAdapter: DictionaryAdapter? = null
+    private var dictionaryEmpty: TextView? = null
+    private var dictionarySearch: EditText? = null
+    private var dictionaryRecycler: RecyclerView? = null
+    private var dictionaryTabs: LinearLayout? = null
     private var dictionaryAdapterConfirmed: Boolean? = null
 
     private var microphoneStatus: TextView? = null
@@ -132,13 +144,21 @@ class SetupActivity : AppCompatActivity() {
     private var accountSignOutAction: View? = null
     private var accountDeleteAction: View? = null
     private var cloudSyncStatus: TextView? = null
+    private var cloudSyncWarning: TextView? = null
     private var cloudSyncActions: List<View> = emptyList()
     private var historySyncSwitch: SwitchMaterial? = null
     private var retentionAction: View? = null
+    private var languageAction: View? = null
+    private var polishAction: View? = null
+    private var contextStatus: TextView? = null
     private var syncing = false
-    private var notificationPermissionRequested = false
+    private var authCallbackInProgress = false
     private var bubbleStatus: TextView? = null
     private var bubbleSwitch: SwitchMaterial? = null
+    private var keepAliveSwitch: SwitchMaterial? = null
+    private var backgroundAction: View? = null
+    private var reliabilityDialog: AlertDialog? = null
+    private var reliabilityBody: LinearLayout? = null
     private var pendingBubbleSetup = false
     private val bubbleHealthHandler = Handler(Looper.getMainLooper())
     private var lastBubbleConnected = false
@@ -162,13 +182,16 @@ class SetupActivity : AppCompatActivity() {
             } else maybeRequestNotificationPermission()
         } else {
             if (pendingBubbleSetup) { pendingBubbleSetup = false; store.floatingBubbleEnabled = false; updateBubbleStatus() }
-            if (!shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
+            if (!shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO) && canShowDialog()) {
                 MaterialAlertDialogBuilder(this)
                     .setTitle("Microphone access")
                     .setMessage("Allow the microphone in Android’s app settings to use voice dictation.")
                     .setNegativeButton("Not now", null)
                     .setPositiveButton("Open settings") { _, _ ->
-                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                        launchActivitySafely(
+                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")),
+                            "Could not open Android app settings.",
+                        )
                     }.show()
             }
         }
@@ -200,10 +223,13 @@ class SetupActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        BubbleKeepAliveService.syncState(this)
+        BubbleHealthJobService.sync(this)
         updateSetupStatus()
+        refreshReliabilityDialogIfOpen()
         BubbleAccessibilityService.refreshConnection()
         bubbleHealthHandler.post(bubbleHealthRefresh)
-        if (account.signedIn) refreshAccount()
+        if (account.signedIn && !authCallbackInProgress) refreshAccount()
         when (activeTab) {
             TAB_HOME -> refreshHome()
             TAB_HISTORY -> refreshHistory()
@@ -223,8 +249,12 @@ class SetupActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        reliabilityDialog?.dismiss()
+        reliabilityDialog = null
+        reliabilityBody = null
         historyJob?.cancel()
         dictionaryJob?.cancel()
+        bubbleHealthHandler.removeCallbacksAndMessages(null)
         scope.cancel()
         super.onDestroy()
     }
@@ -235,10 +265,50 @@ class SetupActivity : AppCompatActivity() {
         handleAuthCallback(intent)
     }
 
+    private fun canShowDialog(): Boolean = !isFinishing && !isDestroyed
+
+    private fun motionAllowed(): Boolean = store.animationsEnabled && systemAnimationsEnabled()
+
+    private fun serviceHost(): String =
+        Uri.parse(store.workerUrl).host?.takeIf(String::isNotBlank) ?: "LiVoice cloud"
+
+    private fun isOwnImeSelected(): Boolean =
+        Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
+            ?.substringBefore('/') == packageName
+
+    private fun launchActivitySafely(intent: Intent, fallbackMessage: String = "No app is available to open that screen.") {
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            Snackbar.make(contentHost, fallbackMessage, Snackbar.LENGTH_LONG).show()
+        } catch (_: SecurityException) {
+            Snackbar.make(contentHost, fallbackMessage, Snackbar.LENGTH_LONG).show()
+        }
+    }
+
+    private fun launchCustomTabSafely(uri: Uri) {
+        try {
+            CustomTabsIntent.Builder()
+                .setShowTitle(true)
+                .setShareState(CustomTabsIntent.SHARE_STATE_OFF)
+                .build()
+                .launchUrl(this, uri)
+        } catch (_: ActivityNotFoundException) {
+            launchActivitySafely(
+                Intent(Intent.ACTION_VIEW, uri),
+                "No web browser was found on this device.",
+            )
+        }
+    }
+
     private fun configureWindow() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        window.statusBarColor = Color.TRANSPARENT
-        window.navigationBarColor = BACKGROUND
+        if (Build.VERSION.SDK_INT < 35) {
+            @Suppress("DEPRECATION")
+            window.statusBarColor = Color.TRANSPARENT
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = BACKGROUND
+        }
         WindowCompat.getInsetsController(window, window.decorView).apply {
             isAppearanceLightStatusBars = false
             isAppearanceLightNavigationBars = false
@@ -251,8 +321,16 @@ class SetupActivity : AppCompatActivity() {
             setBackgroundColor(BACKGROUND)
         }
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or
+                    WindowInsetsCompat.Type.displayCutout() or
+                    WindowInsetsCompat.Type.ime(),
+            )
             view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            val imeVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
+            if (::bottomNavigation.isInitialized) {
+                bottomNavigation.visibility = if (imeVisible) View.GONE else View.VISIBLE
+            }
             insets
         }
 
@@ -265,6 +343,7 @@ class SetupActivity : AppCompatActivity() {
         bottomNavigation = BottomNavigationView(this).apply {
             setBackgroundColor(NAVIGATION)
             elevation = 0f
+            minimumHeight = dp(68)
             itemIconSize = dp(23)
             itemTextAppearanceActive = com.google.android.material.R.style.TextAppearance_Material3_LabelMedium
             itemTextAppearanceInactive = com.google.android.material.R.style.TextAppearance_Material3_LabelMedium
@@ -281,7 +360,7 @@ class SetupActivity : AppCompatActivity() {
                 true
             }
         }
-        root.addView(bottomNavigation, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(72)))
+        root.addView(bottomNavigation, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         return root
     }
 
@@ -300,7 +379,7 @@ class SetupActivity : AppCompatActivity() {
             return
         }
         (incoming.parent as? ViewGroup)?.removeView(incoming)
-        if (!animate || previous == null || !store.animationsEnabled) {
+        if (!animate || previous == null || !motionAllowed()) {
             contentHost.removeAllViews()
             contentHost.addView(incoming, FrameLayout.LayoutParams(-1, -1))
         } else {
@@ -331,62 +410,87 @@ class SetupActivity : AppCompatActivity() {
         val body = pageColumn()
         body.addView(hero("Your voice workspace", "Private analytics and recent dictations"))
 
-        readinessText = TextView(this).apply {
+        val readiness = TextView(this).apply {
             styleText(14f)
             setLineSpacing(0f, 1.2f)
         }
-        body.addView(card("READY STATUS", readinessText))
+        readinessText = readiness
+        body.addView(card("READY STATUS", readiness))
+
+        val warningContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val warningCopy = TextView(this@SetupActivity).apply {
+                styleText(13.5f, Color.WHITE)
+                setLineSpacing(dp(2).toFloat(), 1.16f)
+            }
+            backgroundWarningText = warningCopy
+            addView(warningCopy)
+            addView(
+                actionButton("Fix background setup") { showBubbleBackgroundHelp() },
+                linear(match = true).apply { topMargin = dp(10) },
+            )
+        }
+        val warningCard = card("BACKGROUND RELIABILITY", warningContent).apply {
+            visibility = View.GONE
+        }
+        backgroundWarningCard = warningCard
+        body.addView(warningCard)
 
         body.addView(sectionHeader("Overview"))
-        periodSelector = segmented(
+        val selector = segmented(
             listOf("Today", "7 days", "30 days", "All time"),
             analyticsPeriod.ordinal,
         ) { index ->
             analyticsPeriod = AnalyticsPeriod.entries[index]
-            styleSegmented(periodSelector, index)
+            periodSelector?.let { styleSegmented(it, index) }
             refreshHome()
         }
-        body.addView(periodSelector, linear(match = true, height = dp(48)).apply { bottomMargin = dp(14) })
+        periodSelector = selector
+        body.addView(selector, linear(match = true).apply { bottomMargin = dp(14) })
 
         body.addView(metricRow(metric("dictations", "Dictations"), metric("duration", "Dictation time")))
         body.addView(metricRow(metric("words", "Words dictated"), metric("wpm", "Speaking pace")))
 
-        aiInsightsText = TextView(this).apply {
+        val insights = TextView(this).apply {
             styleText(15f)
             setLineSpacing(dp(3).toFloat(), 1.18f)
         }
-        body.addView(card("AI INSIGHTS", aiInsightsText))
+        aiInsightsText = insights
+        body.addView(card("AI INSIGHTS", insights))
 
         val usageContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            usageTotalText = TextView(this@SetupActivity).apply {
+            val total = TextView(this@SetupActivity).apply {
                 styleText(26f)
                 typeface = Typeface.create("sans-serif", Typeface.BOLD)
             }
-            addView(usageTotalText)
+            usageTotalText = total
+            addView(total)
             addView(TextView(this@SetupActivity).apply {
-                text = "Estimated LiVoice usage — not a Cloudflare invoice"
+                text = "Estimated local LiVoice usage (informational only)"
                 styleText(12.5f, MUTED)
                 setPadding(0, dp(3), 0, dp(12))
             })
-            usageBreakdownText = TextView(this@SetupActivity).apply {
+            val breakdown = TextView(this@SetupActivity).apply {
                 styleText(14f, MUTED)
                 setLineSpacing(dp(2).toFloat(), 1.16f)
             }
-            addView(usageBreakdownText)
+            usageBreakdownText = breakdown
+            addView(breakdown)
         }
         body.addView(card("ESTIMATED AI USAGE", usageContent))
 
         body.addView(sectionHeader("Recent dictations", "View all") {
             bottomNavigation.selectedItemId = TAB_HISTORY
         })
-        recentContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        body.addView(recentContainer)
+        val recents = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        recentContainer = recents
+        body.addView(recents)
         return scroll(body)
     }
 
     private fun refreshHome() {
-        if (!::readinessText.isInitialized) return
+        if (readinessText == null) return
         updateReadiness()
         scope.launch {
             val now = ZonedDateTime.now()
@@ -396,23 +500,24 @@ class SetupActivity : AppCompatActivity() {
                 val month = repository.metricsSince(now.withDayOfMonth(1).toLocalDate().atStartOfDay(now.zone).toInstant().toEpochMilli())
                 selected to (today to month)
             }
+            val container = recentContainer ?: return@launch
             val metrics = WoVoiceRepository.metrics(snapshot.aggregates)
             renderMetrics(metrics, usageRanges.first, usageRanges.second)
-            recentContainer.removeAllViews()
+            container.removeAllViews()
             if (snapshot.recent.isEmpty()) {
-                recentContainer.addView(emptyState("Your successful dictations will appear here.", compact = true))
+                container.addView(emptyState("Your successful dictations will appear here.", compact = true))
             } else {
-                snapshot.recent.forEach { record -> recentContainer.addView(recentPreview(record)) }
+                snapshot.recent.forEach { record -> container.addView(recentPreview(record)) }
             }
         }
     }
 
     private fun updateReadiness() {
+        val target = readinessText ?: return
         val mic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         val manager = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         val enabled = manager.enabledInputMethodList.any { it.packageName == packageName }
-        val selected = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
-            ?.startsWith(packageName) == true
+        val selected = isOwnImeSelected()
         val online = hasValidatedNetwork()
         val connected = account.cloudServicesAllowed
         val accountUnavailable = if (account.signedIn && account.accountStatus.state.restricted) {
@@ -420,27 +525,54 @@ class SetupActivity : AppCompatActivity() {
         } else {
             "Sign in for voice input"
         }
-        readinessText.text = listOf(
+        target.text = listOf(
             statusLine(mic, "Microphone ready", "Microphone permission needed"),
-            statusLine(selected || (store.floatingBubbleEnabled && BubbleAccessibilityService.isEnabled(this) && BubbleAccessibilityService.isConnected()),
+            statusLine(
+                selected || (store.floatingBubbleEnabled && BubbleAccessibilityService.isEnabled(this) && BubbleAccessibilityService.isConnected()),
                 if (selected) "LiVoice selected" else "Bubble ready — keep your current keyboard",
-                if (enabled) "Choose LiVoice or enable the dictation bubble" else "Enable the keyboard or dictation bubble"),
+                if (enabled) "Choose LiVoice or enable the dictation bubble" else "Enable the keyboard or dictation bubble",
+            ),
             statusLine(online, "Network available", "Network unavailable — manual keyboard still works"),
             statusLine(connected, "Account verified", accountUnavailable),
         ).joinToString("\n")
+        updateBackgroundWarningBanner()
+    }
+
+    private fun updateBackgroundWarningBanner() {
+        val cardView = backgroundWarningCard ?: return
+        val copyView = backgroundWarningText ?: return
+        if (!store.floatingBubbleEnabled) {
+            cardView.visibility = View.GONE
+            return
+        }
+        val snapshot = BackgroundReliability.collectSnapshot(this, store)
+        val missing = BackgroundReliability.missingCritical(snapshot)
+        if (missing.isEmpty() && snapshot.exitDiagnosis.swipeUpForceStops24h == 0) {
+            cardView.visibility = View.GONE
+            return
+        }
+        val parts = mutableListOf<String>()
+        if (snapshot.exitDiagnosis.swipeUpForceStops24h > 0) {
+            parts += BackgroundReliability.watchdogMessage(snapshot)
+        }
+        if (missing.isNotEmpty()) {
+            parts += "Missing critical setup: ${missing.joinToString(", ") { it.title }}."
+        }
+        copyView.text = parts.joinToString("\n\n")
+        cardView.visibility = View.VISIBLE
     }
 
     private fun renderMetrics(value: DashboardMetrics, today: DashboardMetrics, month: DashboardMetrics) {
         setMetric("dictations", value.dictations.toString(), "successful")
         setMetric("duration", formatDuration(value.audioDurationMs), "recorded speech")
-        setMetric("words", value.words.toString(), "total words")
+        setMetric("words", value.words.toString(), if (value.words == 1L) "total word" else "total words")
         setMetric("wpm", value.wpm.toString(), "words per minute")
-        aiInsightsText.text = "Median processing   ${formatProcessing(value.medianProcessingMs)}\n" +
+        aiInsightsText?.text = "Median processing   ${formatProcessing(value.medianProcessingMs)}\n" +
             "Polished results     ${value.polishedRate}%\n" +
             "Correction rate      ${value.correctionRate}%"
         val estimatesVisible = store.costEstimatesEnabled
-        usageTotalText.text = if (estimatesVisible) formatCost(value.estimatedCostUsd) else "Hidden"
-        usageBreakdownText.text = if (estimatesVisible) {
+        usageTotalText?.text = if (estimatesVisible) formatCost(value.estimatedCostUsd) else "Hidden"
+        usageBreakdownText?.text = if (estimatesVisible) {
             "Today ${formatCost(today.estimatedCostUsd)}  •  This month ${formatCost(month.estimatedCostUsd)}\n" +
                 "${formatNeurons(value.totalNeurons)} neurons in selected period\n" +
                 "ASR ${formatNeurons(value.asrNeurons)}  •  Polish ${formatNeurons(value.polishNeurons)}"
@@ -454,45 +586,81 @@ class SetupActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(15), dp(20), 0)
         }
-        root.addView(screenHeader("History", "Successful dictations kept on this phone", "Clear") { confirmClearHistory() })
-        historySearch = searchField("Search generated text")
-        root.addView(historySearch, linear(match = true, height = dp(52)).apply { bottomMargin = dp(10) })
-        historySearch.onTextChanged { refreshHistory() }
+        root.addView(
+            screenHeader(
+                title = "History",
+                subtitle = "Successful dictations kept on this phone",
+                action = "Clear",
+                secondaryAction = "Export",
+                onSecondaryAction = ::exportHistory,
+                onAction = ::confirmClearHistory,
+            ),
+        )
+        val search = searchField("Search generated text")
+        historySearch = search
+        root.addView(search, linear(match = true).apply { bottomMargin = dp(10) })
+        search.onTextChanged { refreshHistory() }
 
         val listFrame = FrameLayout(this)
-        historyAdapter = HistoryAdapter(::showHistoryDetail, ::copyRecord)
-        historyRecycler = RecyclerView(this).apply {
+        val adapter = HistoryAdapter(::showHistoryDetail, ::copyRecord)
+        historyAdapter = adapter
+        val recycler = RecyclerView(this).apply {
             layoutManager = LinearLayoutManager(this@SetupActivity)
-            adapter = historyAdapter
-            itemAnimator?.changeDuration = 170
+            this.adapter = adapter
+            itemAnimator?.changeDuration = if (motionAllowed()) 170 else 0
             clipToPadding = false
             setPadding(0, 0, 0, dp(22))
         }
-        historyEmpty = emptyState("No dictations yet.\nUse LiVoice in any text field and your successful results will appear here.")
-        listFrame.addView(historyRecycler, frame(match = true))
-        listFrame.addView(historyEmpty, frame(match = true))
+        historyRecycler = recycler
+        val empty = emptyState("No dictations yet.\nUse LiVoice in any text field and your successful results will appear here.")
+        historyEmpty = empty
+        listFrame.addView(recycler, frame(match = true))
+        listFrame.addView(empty, frame(match = true))
         root.addView(listFrame, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT) {
+        ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.START) {
             override fun onMove(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder) = false
             override fun getSwipeDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder): Int =
-                if (historyAdapter.recordAt(viewHolder.bindingAdapterPosition) == null) 0 else super.getSwipeDirs(recyclerView, viewHolder)
+                if (adapter.recordAt(viewHolder.bindingAdapterPosition) == null) 0 else super.getSwipeDirs(recyclerView, viewHolder)
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
-                historyAdapter.recordAt(viewHolder.bindingAdapterPosition)?.let(::deleteHistoryWithUndo)
+                adapter.recordAt(viewHolder.bindingAdapterPosition)?.let(::deleteHistoryWithUndo)
             }
-        }).attachToRecyclerView(historyRecycler)
+        }).attachToRecyclerView(recycler)
         return root
     }
 
     private fun refreshHistory() {
-        if (!::historyAdapter.isInitialized) return
+        val adapter = historyAdapter ?: return
+        val search = historySearch ?: return
         historyJob?.cancel()
         historyJob = scope.launch {
-            val records = withContext(Dispatchers.IO) { repository.history(historySearch.text.toString()) }
+            val records = withContext(Dispatchers.IO) { repository.history(search.text.toString()) }
             val rows = historyRows(records)
-            historyAdapter.submitList(rows)
-            historyEmpty.visibility = if (rows.isEmpty()) View.VISIBLE else View.GONE
-            historyRecycler.visibility = if (rows.isEmpty()) View.GONE else View.VISIBLE
+            adapter.submitList(rows)
+            historyEmpty?.visibility = if (rows.isEmpty()) View.VISIBLE else View.GONE
+            historyRecycler?.visibility = if (rows.isEmpty()) View.GONE else View.VISIBLE
+        }
+    }
+
+    private fun exportHistory() {
+        val query = historySearch?.text?.toString().orEmpty()
+        scope.launch {
+            val records = withContext(Dispatchers.IO) { repository.history(query) }
+            if (records.isEmpty()) {
+                Snackbar.make(contentHost, "No dictations to export.", Snackbar.LENGTH_SHORT).show()
+                return@launch
+            }
+            val payload = records.joinToString("\n\n---\n\n") { record ->
+                "${historyDateTime(record)} (${formatWordCount(record.wordCount)})\n${record.finalText}"
+            }
+            val shareIntent = Intent(Intent.ACTION_SEND)
+                .setType("text/plain")
+                .putExtra(Intent.EXTRA_SUBJECT, "LiVoice dictation history")
+                .putExtra(Intent.EXTRA_TEXT, payload)
+            launchActivitySafely(
+                Intent.createChooser(shareIntent, "Export dictation history"),
+                "No app is available to share history.",
+            )
         }
     }
 
@@ -516,60 +684,66 @@ class SetupActivity : AppCompatActivity() {
             setPadding(dp(20), dp(15), dp(20), 0)
         }
         root.addView(screenHeader("Dictionary", "Names and terms LiVoice should recognize", "+ Add") { showTermDialog() })
-        dictionaryTabs = segmented(listOf("Confirmed", "Suggestions"), 0) { index ->
+        val tabs = segmented(listOf("Confirmed", "Suggestions"), 0) { index ->
             dictionaryConfirmed = index == 0
-            styleSegmented(dictionaryTabs, index)
+            dictionaryTabs?.let { styleSegmented(it, index) }
             refreshDictionary()
         }
-        root.addView(dictionaryTabs, linear(match = true, height = dp(48)).apply { bottomMargin = dp(10) })
-        dictionarySearch = searchField("Search dictionary")
-        root.addView(dictionarySearch, linear(match = true, height = dp(52)).apply { bottomMargin = dp(10) })
-        dictionarySearch.onTextChanged { refreshDictionary() }
+        dictionaryTabs = tabs
+        root.addView(tabs, linear(match = true).apply { bottomMargin = dp(10) })
+        val search = searchField("Search dictionary")
+        dictionarySearch = search
+        root.addView(search, linear(match = true).apply { bottomMargin = dp(10) })
+        search.onTextChanged { refreshDictionary() }
 
         val frame = FrameLayout(this)
-        dictionaryRecycler = RecyclerView(this).apply {
+        val recycler = RecyclerView(this).apply {
             layoutManager = LinearLayoutManager(this@SetupActivity)
             clipToPadding = false
             setPadding(0, 0, 0, dp(22))
         }
-        dictionaryEmpty = emptyState("No terms here yet.")
-        frame.addView(dictionaryRecycler, frame(match = true))
-        frame.addView(dictionaryEmpty, frame(match = true))
+        dictionaryRecycler = recycler
+        val empty = emptyState("No terms here yet.")
+        dictionaryEmpty = empty
+        frame.addView(recycler, frame(match = true))
+        frame.addView(empty, frame(match = true))
         root.addView(frame, LinearLayout.LayoutParams(-1, 0, 1f))
         installDictionaryAdapter()
         return root
     }
 
     private fun installDictionaryAdapter() {
-        dictionaryAdapter = DictionaryAdapter(
+        val recycler = dictionaryRecycler ?: return
+        val adapter = DictionaryAdapter(
             confirmed = dictionaryConfirmed,
             onPrimary = { entry -> if (dictionaryConfirmed) showTermDialog(entry) else acceptSuggestion(entry) },
             onDelete = { entry -> deleteDictionaryEntry(entry) },
         )
-        dictionaryRecycler.adapter = dictionaryAdapter
+        dictionaryAdapter = adapter
+        recycler.adapter = adapter
         dictionaryAdapterConfirmed = dictionaryConfirmed
     }
 
     private fun refreshDictionary() {
-        if (!::dictionaryRecycler.isInitialized) return
+        if (dictionaryRecycler == null) return
+        val search = dictionarySearch ?: return
         dictionaryJob?.cancel()
-        if (!::dictionaryAdapter.isInitialized || dictionaryAdapterConfirmed != dictionaryConfirmed) installDictionaryAdapter()
+        if (dictionaryAdapter == null || dictionaryAdapterConfirmed != dictionaryConfirmed) installDictionaryAdapter()
+        val adapter = dictionaryAdapter ?: return
         dictionaryJob = scope.launch {
             val values = withContext(Dispatchers.IO) {
-                repository.dictionary(dictionaryConfirmed, dictionarySearch.text.toString())
+                repository.dictionary(dictionaryConfirmed, search.text.toString())
             }
-            dictionaryAdapter.submitList(values)
-            dictionaryEmpty.text = if (dictionaryConfirmed) {
+            adapter.submitList(values)
+            dictionaryEmpty?.text = if (dictionaryConfirmed) {
                 "No confirmed terms yet.\nAdd important names or specialist words."
             } else {
                 "No suggestions to review.\nLiVoice will suggest unusual words after a correction."
             }
-            dictionaryEmpty.visibility = if (values.isEmpty()) View.VISIBLE else View.GONE
-            dictionaryRecycler.visibility = if (values.isEmpty()) View.GONE else View.VISIBLE
+            dictionaryEmpty?.visibility = if (values.isEmpty()) View.VISIBLE else View.GONE
+            dictionaryRecycler?.visibility = if (values.isEmpty()) View.GONE else View.VISIBLE
         }
     }
-
-    private var contextStatus: TextView? = null
 
     private fun buildSettingsScreen(): View {
         val body = pageColumn()
@@ -579,9 +753,13 @@ class SetupActivity : AppCompatActivity() {
         keyboardStatus = statusText()
         body.addView(settingsCard("SETUP", listOf(
             settingBlock("Microphone", microphoneStatus!!, "Allow") { requestMicrophone() },
-            settingBlock("Keyboard access", keyboardStatus!!, "Enable") { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
+            settingBlock("Keyboard access", keyboardStatus!!, "Enable") {
+                launchActivitySafely(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS), "Could not open keyboard settings.")
+            },
             settingAction("Choose active keyboard", "Open Android’s keyboard picker", "Choose") {
-                (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
+                runCatching {
+                    (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker()
+                }
             },
         )))
 
@@ -591,11 +769,34 @@ class SetupActivity : AppCompatActivity() {
             "Show a movable dictation bubble beside the text box you select",
             store.floatingBubbleEnabled,
         ) { enabled ->
-            if (enabled) enableBubble() else { store.floatingBubbleEnabled = false; updateBubbleStatus() }
+            if (enabled) enableBubble() else {
+                store.floatingBubbleEnabled = false
+                BubbleKeepAliveService.syncState(this)
+                BubbleHealthJobService.sync(this)
+                updateBubbleStatus()
+            }
         }
+        keepAliveSwitch = settingSwitch(
+            "Keep running in background",
+            "Shows a quiet status notification so closing LiVoice keeps the bubble alive",
+            store.keepAliveEnabled,
+        ) { enabled ->
+            store.keepAliveEnabled = enabled
+            BubbleKeepAliveService.syncState(this)
+            BubbleHealthJobService.sync(this)
+            updateBubbleStatus()
+            updateBackgroundWarningBanner()
+        }
+        backgroundAction = settingAction(
+            "Keep the bubble available",
+            "Check Autostart, battery, and background protection",
+            "Setup",
+            ::showBubbleBackgroundHelp,
+        )
         body.addView(settingsCard("DICTATION BUBBLE", listOf(
             bubbleSwitch!!,
             bubbleStatus!!,
+            keepAliveSwitch!!,
             TextView(this).apply {
                 text = "Keep Gboard or any other keyboard. Tap the bubble to speak, then tap again to insert. Drag it to move it. Password fields are blocked; changing text boxes cancels the recording."
                 styleText(13f, MUTED)
@@ -604,7 +805,7 @@ class SetupActivity : AppCompatActivity() {
             settingAction("Accessibility connection", "If disconnected, turn LiVoice off and on once in Accessibility", "Reconnect") {
                 if (store.floatingBubbleEnabled) openBubbleAccessibilitySettings() else enableBubble()
             },
-            settingAction("Keep the bubble available", "Allow background activity so your phone does not stop LiVoice", "Configure", ::showBubbleBackgroundHelp),
+            backgroundAction!!,
         )))
 
         contextStatus = statusText()
@@ -612,9 +813,10 @@ class SetupActivity : AppCompatActivity() {
             contextStatus!!,
             settingAction("Understand the writing situation", "Detect the app and field automatically. No situation picker while dictating.", "Choose", ::chooseContext),
             settingAction("Style preference", "Automatic follows the available clues; unknown audiences keep your natural tone.", "Choose") {
+                if (!canShowDialog()) return@settingAction
                 val labels = arrayOf("Automatic (recommended)", "Natural", "Polite", "Professional", "Concise")
                 MaterialAlertDialogBuilder(this).setTitle("Style preference")
-                    .setSingleChoiceItems(labels, ContextPolicy.styles.indexOf(store.contextStyle)) { dialog, index ->
+                    .setSingleChoiceItems(labels, ContextPolicy.styles.indexOf(store.contextStyle).coerceAtLeast(0)) { dialog, index ->
                         store.contextStyle = ContextPolicy.styles[index]
                         updateContextStatus(); dialog.dismiss()
                     }.setNegativeButton("Cancel", null).show()
@@ -632,7 +834,7 @@ class SetupActivity : AppCompatActivity() {
             }
         }
         accountSignInHelp = TextView(this).apply {
-            text = "Passwordless sign-in opens wovoice.aliahad.com. Your rotating session credential is protected by Android Keystore."
+            text = "Passwordless sign-in opens ${serviceHost()}. Your rotating session credential is protected by Android Keystore."
             styleText(12.5f, MUTED)
             setPadding(dp(2), dp(6), dp(2), dp(4))
         }
@@ -643,6 +845,12 @@ class SetupActivity : AppCompatActivity() {
             visibility = View.GONE
         }
         cloudSyncStatus = statusText()
+        cloudSyncWarning = TextView(this).apply {
+            styleText(12.5f, ERROR)
+            setLineSpacing(dp(2).toFloat(), 1.12f)
+            setPadding(dp(2), dp(4), dp(2), dp(4))
+            visibility = View.GONE
+        }
         val syncNowAction = settingAction(
             "Cloud sync",
             "History, dictionary, and analytics follow your account on every device",
@@ -654,7 +862,7 @@ class SetupActivity : AppCompatActivity() {
             store.historySyncEnabled,
         ) { enabled -> onHistorySyncToggled(enabled) }
         retentionAction = settingAction("Auto-delete history", retentionSummary(), "Change") { chooseRetention() }
-        cloudSyncActions = listOf(cloudSyncStatus!!, syncNowAction, historySyncSwitch!!, retentionAction!!)
+        cloudSyncActions = listOf(cloudSyncStatus!!, cloudSyncWarning!!, syncNowAction, historySyncSwitch!!, retentionAction!!)
         accountSignOutAction = settingAction(
             "Sign out",
             "Manual keyboard remains available offline",
@@ -675,9 +883,11 @@ class SetupActivity : AppCompatActivity() {
             accountDeleteAction!!,
         )))
 
+        languageAction = settingAction("Recognition language", languageLabel(store.locale), "Choose", ::chooseLanguage)
+        polishAction = settingAction("Grammar polish", polishLabel(store.polish), "Choose", ::choosePolish)
         body.addView(settingsCard("VOICE & LANGUAGE", listOf(
-            fixedSetting("Recognition language", "English (India)"),
-            fixedSetting("Grammar polish", "Light"),
+            languageAction!!,
+            polishAction!!,
             fixedSetting("Punctuation and numerals", "Automatic"),
             fixedSetting("Spoken commands", "New line and new paragraph"),
         )))
@@ -706,17 +916,18 @@ class SetupActivity : AppCompatActivity() {
 
         body.addView(settingsCard("PRIVACY & DATA", listOf(
             TextView(this).apply {
-                text = "Recordings are temporary and deleted after dictation. A failed bubble upload may stay on this phone for up to a minute for Retry, and is removed on cancel or a text-box change. Optional automatic context sends a writing-task category; Nearby text also sends up to 512 characters before and 128 after the cursor for this request only. Context is not saved in history, sync, or logs; source-app identity stays on this phone. Synced history, approved dictionary entries, and analytics are encrypted for storage by LiVoice."
+                text = "Recordings are temporary and deleted after dictation. A failed upload may stay on this phone for up to a minute for Retry, and is removed on cancel or a text-box change. Optional automatic context sends a writing-task category; Nearby text also sends up to 512 characters before and 128 after the cursor for this request only. Context is not saved in history, sync, or logs; source-app identity stays on this phone. Synced history, approved dictionary entries, and analytics are encrypted for storage by LiVoice."
                 styleText(14f, MUTED)
                 setLineSpacing(dp(3).toFloat(), 1.15f)
                 setPadding(0, dp(4), 0, dp(10))
             },
-            destructiveAction("Clear all local data", "Remove history, analytics, dictionary, connection, and token") { confirmClearAll() },
+            destructiveAction("Clear all local data", "Remove history, analytics, dictionary, and local sign-in credentials") { confirmClearAll() },
         )))
 
+        val versionName = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("1.0")
         body.addView(settingsCard("ABOUT", listOf(
-            fixedSetting("LiVoice", "Version ${packageManager.getPackageInfo(packageName, 0).versionName}"),
-            fixedSetting("Service", "wovoice.aliahad.com • Cloudflare Workers AI"),
+            fixedSetting("LiVoice", "Version $versionName"),
+            fixedSetting("Service", "${serviceHost()} • Cloudflare Workers AI"),
             fixedSetting("Storage", "Encrypted sync • no backup • no analytics SDK"),
         )))
         return scroll(body)
@@ -725,13 +936,14 @@ class SetupActivity : AppCompatActivity() {
     private fun updateSetupStatus() {
         updateBubbleStatus()
         updateContextStatus()
+        updateVoiceLanguageSummaries()
         val micGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         if (micGranted && !pendingBubbleSetup) maybeRequestNotificationPermission()
         microphoneStatus?.text = if (micGranted) "✓ Allowed and ready" else "Permission required for speech input"
         microphoneStatus?.setTextColor(if (micGranted) SUCCESS else MUTED)
         val manager = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         val enabled = manager.enabledInputMethodList.any { it.packageName == packageName }
-        val selected = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)?.startsWith(packageName) == true
+        val selected = isOwnImeSelected()
         keyboardStatus?.text = when {
             selected -> "✓ LiVoice is selected"
             enabled -> "Enabled — choose LiVoice as active keyboard"
@@ -760,11 +972,13 @@ class SetupActivity : AppCompatActivity() {
         accountQuota?.text = if (restricted) {
             "Voice input and encrypted sync are paused. Manual typing remains available offline."
         } else if (signedIn) {
-            account.currentQuota?.let {
-                "${it.remainingAudioSeconds.roundToInt()} of ${it.limitAudioSeconds.roundToInt()} voice seconds remaining today"
+            account.currentQuota?.let { quota ->
+                val base = "${quota.remainingAudioSeconds.roundToInt()} of ${quota.limitAudioSeconds.roundToInt()} voice seconds remaining today"
+                val reset = formatQuotaReset(quota.resetAtMs)
+                if (reset != null) "$base • $reset" else base
             } ?: "Checking today’s free quota…"
         } else {
-            "10 minutes of voice input per UTC day"
+            "Daily free voice allowance included with your LiVoice account"
         }
         accountQuota?.setTextColor(if (restricted) ERROR else MUTED)
         accountRestrictionMessage?.text = if (restricted) restrictionSummary() else ""
@@ -782,65 +996,306 @@ class SetupActivity : AppCompatActivity() {
             switch.setOnCheckedChangeListener(null)
             switch.isChecked = store.floatingBubbleEnabled
             switch.setOnCheckedChangeListener { _, enabled ->
-                if (enabled) enableBubble() else { store.floatingBubbleEnabled = false; updateBubbleStatus() }
+                if (enabled) enableBubble() else {
+                    store.floatingBubbleEnabled = false
+                    BubbleKeepAliveService.syncState(this)
+                    BubbleHealthJobService.sync(this)
+                    updateBubbleStatus()
+                }
             }
         }
+        keepAliveSwitch?.let { switch ->
+            switch.setOnCheckedChangeListener(null)
+            switch.isChecked = store.keepAliveEnabled
+            switch.setOnCheckedChangeListener { _, enabled ->
+                store.keepAliveEnabled = enabled
+                BubbleKeepAliveService.syncState(this)
+                BubbleHealthJobService.sync(this)
+                updateBubbleStatus()
+                updateBackgroundWarningBanner()
+            }
+        }
+        val restricted = account.signedIn && account.accountStatus.state.restricted
         bubbleStatus?.text = when {
             !store.floatingBubbleEnabled -> "Bubble is off"
             ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED -> "Microphone permission needed"
             !BubbleAccessibilityService.isEnabled(this) -> "Accessibility access is off — tap Reconnect"
             !BubbleAccessibilityService.isConnected() -> "Accessibility disconnected — tap Reconnect"
             !account.signedIn -> "Accessibility ready — sign in below to dictate"
+            restricted -> "Account ${account.accountStatus.state.name.lowercase()} — bubble dictation is paused"
             else -> "Ready — select a text box while using another keyboard"
         }
+        bubbleStatus?.setTextColor(if (restricted && store.floatingBubbleEnabled) ERROR else MUTED)
+        val snapshot = BackgroundReliability.collectSnapshot(this, store)
+        updateSettingSummary(backgroundAction, BackgroundReliability.summaryLine(snapshot))
+        updateBackgroundWarningBanner()
     }
 
     private fun showBubbleBackgroundHelp() {
-        val xiaomi = Build.MANUFACTURER.lowercase(Locale.ROOT) in setOf("xiaomi", "redmi", "poco")
-        val steps = if (xiaomi) {
-            "In LiVoice’s App info:\n\n1. Enable Autostart.\n2. Open Power and choose No restrictions.\n3. In Recents, hold the LiVoice card and tap its lock icon to protect it from Clear all.\n\nSome Xiaomi versions force-stop an app when you swipe its card away, which can also turn Accessibility off. Use Home or Back to close the screen."
-        } else {
-            "In LiVoice’s App info, open Battery or App battery usage and allow background activity (Unrestricted, if available). Your phone may also have an Autostart setting.\n\nUse Home or Back to close the screen while keeping dictation available."
+        if (!canShowDialog()) return
+        reliabilityDialog?.dismiss()
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(10), dp(20), dp(12))
         }
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Keep the bubble available")
-            .setMessage("Android keeps the Accessibility connection in the background. The microphone runs only when you start dictation.\n\n$steps\n\nAfter Force stop or turning Accessibility off, reopen LiVoice and tap Reconnect. Android requires you to enable that access yourself.")
-            .setNegativeButton("Done", null)
-            .setPositiveButton("App settings") { _, _ ->
-                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
-            }.show()
+        reliabilityBody = body
+        populateReliabilityChecklist(body)
+        val scroll = ScrollView(this).apply { addView(body) }
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle("Background reliability setup")
+            .setView(scroll)
+            .setNeutralButton("App info") { _, _ -> HyperOS.appDetails(this) }
+            .setPositiveButton("Done", null)
+            .create()
+        dialog.setOnDismissListener {
+            if (reliabilityDialog === dialog) {
+                reliabilityDialog = null
+                reliabilityBody = null
+            }
+        }
+        reliabilityDialog = dialog
+        dialog.show()
+    }
+
+    private fun refreshReliabilityDialogIfOpen() {
+        val dialog = reliabilityDialog ?: return
+        val body = reliabilityBody ?: return
+        if (!dialog.isShowing) return
+        populateReliabilityChecklist(body)
+    }
+
+    private fun populateReliabilityChecklist(container: LinearLayout) {
+        container.removeAllViews()
+        val snapshot = BackgroundReliability.collectSnapshot(this, store)
+        val items = BackgroundReliability.evaluateChecks(snapshot)
+        val done = items.count { it.ok == true }
+
+        container.addView(TextView(this).apply {
+            text = "$done of ${items.size} ready"
+            styleText(18f, Color.WHITE)
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+        })
+        container.addView(TextView(this).apply {
+            val platform = if (snapshot.isXiaomi) "Xiaomi HyperOS" else "Android"
+            text = "$platform stops background apps aggressively. Tap Fix on each item below so closing LiVoice keeps your dictation bubble and Accessibility active."
+            styleText(13f, MUTED)
+            setLineSpacing(dp(2).toFloat(), 1.15f)
+            setPadding(0, dp(4), 0, dp(10))
+        })
+
+        // 24h watchdog card (powered by ApplicationExitInfo on Android 11+)
+        val watchdog = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = rounded(
+                if (snapshot.exitDiagnosis.hadRecentInterruption) Color.argb(46, 255, 114, 132) else CARD,
+                dp(12).toFloat(),
+            )
+            addView(TextView(this@SetupActivity).apply {
+                text = if (snapshot.exitDiagnosis.hadRecentInterruption) "24h watchdog — interruption detected" else "24h watchdog — healthy"
+                styleText(13.5f, if (snapshot.exitDiagnosis.hadRecentInterruption) ERROR else SUCCESS)
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            })
+            addView(TextView(this@SetupActivity).apply {
+                text = BackgroundReliability.watchdogMessage(snapshot)
+                styleText(12.5f, Color.WHITE)
+                setLineSpacing(dp(2).toFloat(), 1.15f)
+                setPadding(0, dp(4), 0, 0)
+            })
+        }
+        container.addView(watchdog, linear(match = true).apply { bottomMargin = dp(12) })
+
+        for (item in items) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.TOP
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                background = rounded(CARD, dp(12).toFloat())
+            }
+            val (badgeText, badgeColor) = when (item.ok) {
+                true -> "✓" to SUCCESS
+                false -> "!" to ERROR
+                null -> "?" to Color.rgb(224, 161, 0)
+            }
+            val badge = TextView(this).apply {
+                text = badgeText
+                setTextColor(Color.WHITE)
+                textSize = 13f
+                gravity = Gravity.CENTER
+                typeface = Typeface.create("sans-serif", Typeface.BOLD)
+                background = rounded(badgeColor, dp(13).toFloat())
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }
+            row.addView(badge, LinearLayout.LayoutParams(dp(26), dp(26)).apply {
+                marginEnd = dp(10)
+                topMargin = dp(2)
+            })
+
+            val textCol = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            textCol.addView(TextView(this).apply {
+                text = if (item.critical) item.title else "${item.title} (recommended)"
+                styleText(14f, Color.WHITE)
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            })
+            textCol.addView(TextView(this).apply {
+                text = item.summary
+                styleText(12.5f, MUTED)
+                setLineSpacing(dp(2).toFloat(), 1.14f)
+                setPadding(0, dp(3), 0, dp(8))
+            })
+
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            if (item.key != BackgroundCheckKey.RECENTS_LOCK) {
+                val label = if (item.ok == true) "Open" else "Fix"
+                val button = smallAction(label, "$label ${item.title}") {
+                    runReliabilityFix(item.key)
+                }
+                actions.addView(button)
+            }
+            if (item.confirmable) {
+                val confirmLabel = if (item.ok == true) "Undo" else "I've done this"
+                val confirmBtn = smallAction(confirmLabel, "$confirmLabel ${item.title}") {
+                    store.recentsLockConfirmed = item.ok != true
+                    populateReliabilityChecklist(container)
+                    updateBubbleStatus()
+                }
+                actions.addView(confirmBtn, linear().apply {
+                    if (item.key != BackgroundCheckKey.RECENTS_LOCK) marginStart = dp(8)
+                })
+            }
+            textCol.addView(actions)
+            row.addView(textCol, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            container.addView(row, linear(match = true).apply { bottomMargin = dp(8) })
+        }
+    }
+
+    private fun runReliabilityFix(key: BackgroundCheckKey) {
+        when (key) {
+            BackgroundCheckKey.ACCESSIBILITY -> openBubbleAccessibilitySettings()
+            BackgroundCheckKey.BATTERY -> {
+                if (!HyperOS.battery(this)) {
+                    Snackbar.make(contentHost, "Could not open battery settings.", Snackbar.LENGTH_LONG).show()
+                }
+            }
+            BackgroundCheckKey.AUTOSTART -> {
+                if (!HyperOS.autostart(this)) {
+                    Snackbar.make(contentHost, "Could not open Autostart settings.", Snackbar.LENGTH_LONG).show()
+                }
+            }
+            BackgroundCheckKey.NOTIFICATIONS -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    HyperOS.notifications(this)
+                }
+            }
+            BackgroundCheckKey.KEEP_ALIVE -> {
+                store.floatingBubbleEnabled = true
+                store.keepAliveEnabled = true
+                BubbleKeepAliveService.syncState(this)
+                BubbleHealthJobService.sync(this)
+                bubbleHealthHandler.postDelayed({
+                    refreshReliabilityDialogIfOpen()
+                    updateBubbleStatus()
+                }, 350)
+            }
+            BackgroundCheckKey.RECENTS_LOCK -> Unit
+        }
     }
 
     private fun updateContextStatus() {
-        val label = when (store.contextLevel) { ContextLevel.OFF -> "Off"; ContextLevel.APP -> "App and field only"; ContextLevel.NEARBY -> "App, field, and nearby text" }
+        val label = when (store.contextLevel) {
+            ContextLevel.OFF -> "Off"
+            ContextLevel.APP -> "App and field only"
+            ContextLevel.NEARBY -> "App, field, and nearby text"
+        }
         contextStatus?.text = "$label • Style: ${store.contextStyle}"
     }
 
+    private fun updateVoiceLanguageSummaries() {
+        updateSettingSummary(languageAction, languageLabel(store.locale))
+        updateSettingSummary(polishAction, polishLabel(store.polish))
+    }
+
+    private fun updateSettingSummary(row: View?, text: String) {
+        (((row as? ViewGroup)?.getChildAt(0) as? ViewGroup)?.getChildAt(1) as? TextView)?.text = text
+    }
+
+    private fun chooseLanguage() {
+        if (!canShowDialog()) return
+        val codes = LANGUAGE_OPTIONS.map { it.first }
+        val labels = LANGUAGE_OPTIONS.map { it.second }.toTypedArray()
+        val selected = codes.indexOf(store.locale).coerceAtLeast(0)
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Recognition language")
+            .setSingleChoiceItems(labels, selected) { dialog, index ->
+                store.locale = codes[index]
+                updateVoiceLanguageSummaries()
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun choosePolish() {
+        if (!canShowDialog()) return
+        val codes = POLISH_OPTIONS.map { it.first }
+        val labels = POLISH_OPTIONS.map { it.second }.toTypedArray()
+        val selected = codes.indexOf(store.polish).coerceAtLeast(0)
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Grammar polish")
+            .setSingleChoiceItems(labels, selected) { dialog, index ->
+                store.polish = codes[index]
+                updateVoiceLanguageSummaries()
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun chooseContext() {
+        if (!canShowDialog()) return
         val levels = ContextLevel.entries
         MaterialAlertDialogBuilder(this).setTitle("Automatic context")
             .setSingleChoiceItems(arrayOf("Off", "App and field only", "App, field, and nearby text"), levels.indexOf(store.contextLevel)) { dialog, index ->
                 dialog.dismiss()
                 val level = levels[index]
-                if (level == ContextLevel.OFF) { store.contextLevel = level; updateContextStatus() }
-                else MaterialAlertDialogBuilder(this)
-                    .setTitle(if (level == ContextLevel.NEARBY) "Allow nearby text?" else "Allow app and field context?")
-                    .setMessage(if (level == ContextLevel.NEARBY)
-                        "When you start dictation, LiVoice uses the focused editor and up to 512 characters before and 128 after your selection. These snippets go to LiVoice’s Cloudflare service with that recording to guide grammar and tone. They are not saved in history, sync, or logs. It does not read full conversations or contacts. Password and sensitive fields are excluded. You can switch this off at any time."
-                        else "When you start dictation, LiVoice detects the app and field locally and sends only a writing-task category, such as chat or email. App names, field labels, and existing text are not sent. Unknown situations keep your natural tone. You can switch this off at any time.")
-                    .setPositiveButton("Allow") { _, _ -> store.contextLevel = level; updateContextStatus() }
-                    .setNegativeButton("Cancel", null).show()
+                if (level == ContextLevel.OFF) {
+                    store.contextLevel = level
+                    updateContextStatus()
+                } else if (canShowDialog()) {
+                    MaterialAlertDialogBuilder(this)
+                        .setTitle(if (level == ContextLevel.NEARBY) "Allow nearby text?" else "Allow app and field context?")
+                        .setMessage(
+                            if (level == ContextLevel.NEARBY) {
+                                "When you start dictation, LiVoice uses the focused editor and up to 512 characters before and 128 after your selection. These snippets go to LiVoice’s service with that recording to guide grammar and tone. They are not saved in history, sync, or logs. It does not read full conversations or contacts. Password and sensitive fields are excluded. You can switch this off at any time."
+                            } else {
+                                "When you start dictation, LiVoice detects the app and field locally and sends only a writing-task category, such as chat or email. App names, field labels, and existing text are not sent. Unknown situations keep your natural tone. You can switch this off at any time."
+                            },
+                        )
+                        .setPositiveButton("Allow") { _, _ -> store.contextLevel = level; updateContextStatus() }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                }
             }.setNegativeButton("Cancel", null).show()
     }
 
     private fun enableBubble() {
+        if (!canShowDialog()) return
         MaterialAlertDialogBuilder(this)
             .setTitle("Speak without switching keyboard")
-            .setMessage("LiVoice needs Accessibility access to find and edit the text box you select. Text already in the box is read on this phone to preserve it. Your recording and approved Dictionary terms are sent for transcription. Automatic context is off until you enable it separately; Nearby text requires a separate choice to send bounded cursor text for that dictation.\n\nRecording starts when you tap the bubble. Failed uploads may stay on this phone for up to a minute for Retry. Password and PIN fields are blocked. You can turn this off here at any time.")
+            .setMessage("LiVoice needs Accessibility access to find and edit the text box you select. Surrounding text is never sent unless you turn on optional Nearby text in LiVoice Settings. Your recording and approved Dictionary terms are sent for transcription.\n\nRecording starts when you tap the bubble. Failed uploads may stay on this phone for up to a minute for Retry. Password fields are blocked. You can turn this off here at any time.")
             .setNegativeButton("Not now") { _, _ -> updateBubbleStatus() }
             .setOnCancelListener { updateBubbleStatus() }
             .setPositiveButton("Continue") { _, _ ->
                 store.floatingBubbleEnabled = true
+                BubbleKeepAliveService.syncState(this)
+                BubbleHealthJobService.sync(this)
                 if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
                     openBubbleAccessibilitySettings()
                 } else {
@@ -853,10 +1308,10 @@ class SetupActivity : AppCompatActivity() {
 
     private fun requestMicrophone() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) return
-        if (shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
+        if (shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO) && canShowDialog()) {
             MaterialAlertDialogBuilder(this)
                 .setTitle("Allow microphone access")
-                .setMessage("LiVoice records only while you ask it to listen. Recordings are deleted after dictation; a failed bubble upload can stay on this phone for up to a minute so you can retry.")
+                .setMessage("LiVoice records only while you ask it to listen. Recordings are deleted after dictation; a failed upload can stay on this phone for up to a minute so you can retry.")
                 .setNegativeButton("Not now") { _, _ -> pendingBubbleSetup = false; updateBubbleStatus() }
                 .setPositiveButton("Continue") { _, _ -> permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }.show()
         } else permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -865,7 +1320,10 @@ class SetupActivity : AppCompatActivity() {
     private fun openBubbleAccessibilitySettings() {
         // The service-details action requires a system permission on newer Android versions.
         // The public Accessibility settings screen works across Android and vendor builds.
-        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        launchActivitySafely(
+            Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS),
+            "Could not open Android Accessibility settings.",
+        )
     }
 
     private fun startAccountLogin(intent: String = SessionManager.AUTH_LOGIN) {
@@ -875,11 +1333,7 @@ class SetupActivity : AppCompatActivity() {
             .appendQueryParameter("state", request.state)
             .appendQueryParameter("intent", intent)
             .build()
-        CustomTabsIntent.Builder()
-            .setShowTitle(true)
-            .setShareState(CustomTabsIntent.SHARE_STATE_OFF)
-            .build()
-            .launchUrl(this, uri)
+        launchCustomTabSafely(uri)
     }
 
     private fun handleAuthCallback(value: Intent?) {
@@ -887,6 +1341,7 @@ class SetupActivity : AppCompatActivity() {
         val expectedHost = Uri.parse(store.workerUrl).host
         if (uri.scheme != "https" || uri.host != expectedHost || uri.path != "/app/callback") return
         value.data = null
+        if (authCallbackInProgress) return
         val code = uri.getQueryParameter("code").orEmpty()
         val reauthToken = uri.getQueryParameter("reauth_token").orEmpty()
         val state = uri.getQueryParameter("state").orEmpty()
@@ -894,28 +1349,36 @@ class SetupActivity : AppCompatActivity() {
             Snackbar.make(contentHost, "The sign-in response could not be verified. Please try again.", Snackbar.LENGTH_LONG).show()
             return
         }
-        accountStatus?.text = "Completing secure sign-in…"
+        authCallbackInProgress = true
+        accountStatus?.text = if (reauthToken.isNotBlank()) "Deleting LiVoice account…" else "Completing secure sign-in…"
         accountButton?.isEnabled = false
+        accountDeleteAction?.isEnabled = false
         val previousAccountId = store.lastAccountId
+        val activeAccountId = account.accountId ?: previousAccountId
         scope.launch {
-            if (reauthToken.isNotBlank()) {
-                completeAccountDeletion(reauthToken, state, previousAccountId)
-                return@launch
-            }
-            val result = withContext(Dispatchers.IO) { account.completeLogin(code, state) }
-            accountButton?.isEnabled = true
-            when (result) {
-                is AccountResult.Success -> {
-                    Snackbar.make(contentHost, "Signed in as ${result.value.email}", Snackbar.LENGTH_LONG).show()
-                    handleLocalDataAfterLogin(result.value.id, previousAccountId)
-                    refreshAccount()
-                    refreshHome()
+            try {
+                if (reauthToken.isNotBlank()) {
+                    completeAccountDeletion(reauthToken, state, activeAccountId)
+                    return@launch
                 }
-                is AccountResult.Error -> {
-                    accountStatus?.text = result.message
-                    accountStatus?.setTextColor(ERROR)
-                    Snackbar.make(contentHost, result.message, Snackbar.LENGTH_LONG).show()
+                val result = withContext(Dispatchers.IO) { account.completeLogin(code, state) }
+                when (result) {
+                    is AccountResult.Success -> {
+                        Snackbar.make(contentHost, "Signed in as ${result.value.email}", Snackbar.LENGTH_LONG).show()
+                        handleLocalDataAfterLogin(result.value.id, previousAccountId)
+                        refreshAccount()
+                        refreshHome()
+                    }
+                    is AccountResult.Error -> {
+                        accountStatus?.text = result.message
+                        accountStatus?.setTextColor(ERROR)
+                        Snackbar.make(contentHost, result.message, Snackbar.LENGTH_LONG).show()
+                    }
                 }
+            } finally {
+                authCallbackInProgress = false
+                accountButton?.isEnabled = true
+                accountDeleteAction?.isEnabled = true
             }
         }
     }
@@ -923,17 +1386,16 @@ class SetupActivity : AppCompatActivity() {
     private suspend fun completeAccountDeletion(reauthToken: String, state: String, accountId: String?) {
         when (val result = withContext(Dispatchers.IO) { account.completeAccountDeletion(reauthToken, state) }) {
             is AccountResult.Success -> {
-                if (accountId != null) withContext(Dispatchers.IO) { repository.deleteAccountLocalData(accountId) }
+                if (!accountId.isNullOrBlank()) withContext(Dispatchers.IO) { repository.deleteAccountLocalData(accountId) }
                 Snackbar.make(contentHost, "LiVoice account and its local partition were deleted.", Snackbar.LENGTH_LONG).show()
                 updateSetupStatus(); refreshHome(); refreshHistory(); refreshDictionary()
             }
             is AccountResult.Error -> Snackbar.make(contentHost, result.message, Snackbar.LENGTH_LONG).show()
         }
-        accountButton?.isEnabled = true
     }
 
     private fun handleLocalDataAfterLogin(accountId: String, previousAccountId: String?) {
-        if (!previousAccountId.isNullOrBlank() && previousAccountId != accountId) {
+        if (!previousAccountId.isNullOrBlank() && previousAccountId != accountId && canShowDialog()) {
             MaterialAlertDialogBuilder(this)
                 .setTitle("Keep previous account data?")
                 .setMessage("Local records from the previous account are isolated and will never sync to this account. Keep them for a later sign-in, or delete them from this phone now.")
@@ -951,7 +1413,7 @@ class SetupActivity : AppCompatActivity() {
     private fun promptLegacyData(accountId: String) {
         scope.launch {
             val count = withContext(Dispatchers.IO) { repository.unassignedCount() }
-            if (count <= 0) return@launch
+            if (count <= 0 || !canShowDialog()) return@launch
             MaterialAlertDialogBuilder(this@SetupActivity)
                 .setTitle("Use existing local data?")
                 .setMessage("LiVoice found $count local history, analytics, or dictionary items from before accounts were added. Assign them to this verified account for encrypted sync, delete them, or decide later.")
@@ -963,6 +1425,7 @@ class SetupActivity : AppCompatActivity() {
                     scope.launch {
                         withContext(Dispatchers.IO) { repository.assignUnassignedTo(accountId) }
                         refreshHome(); refreshHistory(); refreshDictionary()
+                        runCloudSync(showResult = false)
                     }
                 }
                 .show()
@@ -986,7 +1449,7 @@ class SetupActivity : AppCompatActivity() {
                     updateSetupStatus()
                     if (result.code == "AUTH_REQUIRED") {
                         Snackbar.make(contentHost, "Your session ended. Sign in again to use voice input.", Snackbar.LENGTH_LONG).show()
-                    } else {
+                    } else if (!account.accountStatus.state.restricted) {
                         accountQuota?.text = result.message
                         accountQuota?.setTextColor(ERROR)
                     }
@@ -1010,6 +1473,7 @@ class SetupActivity : AppCompatActivity() {
     }
 
     private fun showSessionList(values: List<DeviceSession>) {
+        if (!canShowDialog()) return
         if (values.isEmpty()) {
             Snackbar.make(contentHost, "No active devices were found.", Snackbar.LENGTH_SHORT).show()
             return
@@ -1073,10 +1537,12 @@ class SetupActivity : AppCompatActivity() {
     }
 
     private fun confirmAccountDeletion() {
+        if (authCallbackInProgress) return
         if (!account.signedIn) {
             Snackbar.make(contentHost, "Sign in before deleting an account.", Snackbar.LENGTH_LONG).show()
             return
         }
+        if (!canShowDialog()) return
         MaterialAlertDialogBuilder(this)
             .setTitle("Permanently delete account?")
             .setMessage("LiVoice will require a fresh email code. Deletion removes all sessions, quota identity, and encrypted cloud records. This phone’s partition will also be removed. This cannot be undone.")
@@ -1091,10 +1557,14 @@ class SetupActivity : AppCompatActivity() {
         syncing = true
         cloudSyncStatus?.text = "Syncing…"
         scope.launch {
-            val result = withContext(Dispatchers.IO) { sync.syncNow() }
-            syncing = false
+            val result = try {
+                withContext(Dispatchers.IO) { sync.syncNow() }
+            } finally {
+                syncing = false
+            }
             when (result) {
                 is SyncResult.Success -> {
+                    store.syncWarning = result.warning
                     if (showResult) {
                         Snackbar.make(
                             contentHost,
@@ -1107,6 +1577,7 @@ class SetupActivity : AppCompatActivity() {
                 is SyncResult.Error -> {
                     cloudSyncStatus?.text = result.message
                     if (showResult) Snackbar.make(contentHost, result.message, Snackbar.LENGTH_LONG).show()
+                    if (account.accountStatus.state.restricted) updateSetupStatus()
                 }
             }
             historySyncSwitch?.let { switch ->
@@ -1124,12 +1595,23 @@ class SetupActivity : AppCompatActivity() {
             last <= 0L -> "Not synced yet on this phone"
             else -> "Last synced ${java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date(last))}"
         }
+        val warning = store.syncWarning
+        cloudSyncWarning?.text = warning.orEmpty()
+        cloudSyncWarning?.visibility = if (account.signedIn && !account.accountStatus.state.restricted && !warning.isNullOrBlank()) {
+            View.VISIBLE
+        } else {
+            View.GONE
+        }
     }
 
     private fun onHistorySyncToggled(enabled: Boolean) {
         val switch = historySyncSwitch ?: return
         if (enabled) {
             updateHistorySync(true)
+            return
+        }
+        if (!canShowDialog()) {
+            setSwitchSilently(switch, true)
             return
         }
         MaterialAlertDialogBuilder(this)
@@ -1173,10 +1655,11 @@ class SetupActivity : AppCompatActivity() {
     }
 
     private fun updateRetentionSummary() {
-        (((retentionAction as? ViewGroup)?.getChildAt(0) as? ViewGroup)?.getChildAt(1) as? TextView)?.text = retentionSummary()
+        updateSettingSummary(retentionAction, retentionSummary())
     }
 
     private fun chooseRetention() {
+        if (!canShowDialog()) return
         val options = listOf<Int?>(null, 30, 90, 365)
         val labels = arrayOf("Never", "After 30 days", "After 90 days", "After 1 year")
         val current = options.indexOf(store.historyRetentionDays).coerceAtLeast(0)
@@ -1203,6 +1686,7 @@ class SetupActivity : AppCompatActivity() {
     }
 
     private fun showAccountRestriction() {
+        if (!canShowDialog()) return
         val status = account.accountStatus
         val title = if (status.state == AccountState.BANNED) "Account banned" else "Account suspended"
         MaterialAlertDialogBuilder(this)
@@ -1210,7 +1694,10 @@ class SetupActivity : AppCompatActivity() {
             .setMessage(restrictionSummary())
             .setNegativeButton("Close", null)
             .setPositiveButton("Contact support") { _, _ ->
-                startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:${status.supportEmail}")))
+                launchActivitySafely(
+                    Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:${status.supportEmail}")),
+                    "No email app was found. Contact ${status.supportEmail}.",
+                )
             }
             .show()
     }
@@ -1240,11 +1727,7 @@ class SetupActivity : AppCompatActivity() {
 
     private fun openServicePage(path: String) {
         val url = "${store.workerUrl.trimEnd('/')}${if (path.startsWith('/')) path else "/$path"}"
-        CustomTabsIntent.Builder()
-            .setShowTitle(true)
-            .setShareState(CustomTabsIntent.SHARE_STATE_OFF)
-            .build()
-            .launchUrl(this, Uri.parse(url))
+        launchCustomTabSafely(Uri.parse(url))
     }
 
     private fun hasValidatedNetwork(): Boolean {
@@ -1258,14 +1741,15 @@ class SetupActivity : AppCompatActivity() {
     // Android 13+ silently drops the "LiVoice is listening" foreground notification
     // unless POST_NOTIFICATIONS was granted, so ask once the microphone is usable.
     private fun maybeRequestNotificationPermission() {
-        if (notificationPermissionRequested) return
+        if (store.notificationPermissionRequested) return
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
-        notificationPermissionRequested = true
+        store.notificationPermissionRequested = true
         notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     private fun showTermDialog(entry: DictionaryEntry? = null) {
+        if (!canShowDialog()) return
         val field = input("Name or specialist term", InputType.TYPE_CLASS_TEXT).apply {
             setText(entry?.term.orEmpty())
             selectAll()
@@ -1274,7 +1758,7 @@ class SetupActivity : AppCompatActivity() {
             .setTitle(if (entry == null) "Add dictionary term" else "Edit dictionary term")
             .setView(LinearLayout(this).apply {
                 setPadding(dp(22), dp(6), dp(22), 0)
-                addView(field, linear(match = true, height = dp(54)))
+                addView(field, linear(match = true))
             })
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Save") { _, _ ->
@@ -1283,7 +1767,11 @@ class SetupActivity : AppCompatActivity() {
                         if (entry == null) repository.addManualTerm(field.text.toString())
                         else repository.renameTerm(entry, field.text.toString())
                     }
-                    if (!saved) Snackbar.make(contentHost, "That term is invalid or already exists.", Snackbar.LENGTH_SHORT).show()
+                    if (!saved) {
+                        Snackbar.make(contentHost, "That term is invalid or already exists.", Snackbar.LENGTH_SHORT).show()
+                    } else {
+                        runCloudSync(showResult = false)
+                    }
                     refreshDictionary()
                 }
             }
@@ -1295,6 +1783,7 @@ class SetupActivity : AppCompatActivity() {
             withContext(Dispatchers.IO) { repository.acceptSuggestion(entry) }
             refreshDictionary()
             Snackbar.make(contentHost, "Added “${entry.term}” to your dictionary.", Snackbar.LENGTH_SHORT).show()
+            runCloudSync(showResult = false)
         }
     }
 
@@ -1302,17 +1791,24 @@ class SetupActivity : AppCompatActivity() {
         scope.launch {
             withContext(Dispatchers.IO) { repository.deleteDictionary(entry) }
             refreshDictionary()
+            if (entry.isConfirmed) runCloudSync(showResult = false)
         }
     }
 
     private fun showHistoryDetail(record: DictationRecord) {
-        val detail = "${record.wordCount} words • ${formatDuration(record.audioDurationMs)} • ${record.asrModel}\n" +
+        if (!canShowDialog()) return
+        val detail = "${formatWordCount(record.wordCount)} • ${formatDuration(record.audioDurationMs)} • ${record.asrModel}\n" +
             "Processed in ${formatProcessing(record.totalMs)}${if (record.polished) " • Polished" else ""}"
         MaterialAlertDialogBuilder(this)
             .setTitle(historyDateTime(record))
             .setMessage("${record.finalText}\n\n$detail")
             .setNegativeButton("Delete") { _, _ -> deleteHistoryWithUndo(record) }
-            .setNeutralButton("Close", null)
+            .setNeutralButton("Share") { _, _ ->
+                val share = Intent(Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(Intent.EXTRA_TEXT, record.finalText)
+                launchActivitySafely(Intent.createChooser(share, "Share dictation"), "No app is available to share.")
+            }
             .setPositiveButton("Copy") { _, _ -> copyRecord(record) }
             .show()
     }
@@ -1336,7 +1832,7 @@ class SetupActivity : AppCompatActivity() {
 
     private fun deleteHistoryWithUndo(record: DictationRecord) {
         scope.launch {
-            withContext(Dispatchers.IO) { repository.deleteHistory(record) }
+            withContext(Dispatchers.IO) { repository.deleteHistory(record, holdWindowMs = UNDO_HOLD_MS) }
             refreshHistory()
             refreshHome()
             Snackbar.make(contentHost, "Dictation deleted.", Snackbar.LENGTH_LONG)
@@ -1345,8 +1841,18 @@ class SetupActivity : AppCompatActivity() {
                         withContext(Dispatchers.IO) { repository.restoreHistory(record) }
                         refreshHistory()
                         refreshHome()
+                        runCloudSync(showResult = false)
                     }
-                }.show()
+                }
+                .addCallback(object : Snackbar.Callback() {
+                    override fun onDismissed(transientBottomBar: Snackbar?, event: Int) {
+                        if (event != DISMISS_EVENT_ACTION) {
+                            repository.releaseHistoryDeleteHold(record)
+                            runCloudSync(showResult = false)
+                        }
+                    }
+                })
+                .show()
         }
     }
 
@@ -1365,6 +1871,7 @@ class SetupActivity : AppCompatActivity() {
         scope.launch {
             withContext(Dispatchers.IO) { repository.clearHistory() }
             refreshHistory(); refreshHome()
+            runCloudSync(showResult = false)
         }
     }
 
@@ -1376,31 +1883,93 @@ class SetupActivity : AppCompatActivity() {
         scope.launch {
             withContext(Dispatchers.IO) { repository.resetAnalytics() }
             refreshHome()
+            runCloudSync(showResult = false)
         }
     }
 
     private fun confirmClearAll() = confirm(
         "Clear all local data?",
-        "This removes history, analytics, dictionary, Worker connection, and the encrypted token from this phone and signs it out. Copies already synced stay in your account.",
+        "This removes history, analytics, dictionary, and local sign-in credentials from this phone and signs it out. Copies already synced stay in your account.",
         "Clear all",
     ) {
         scope.launch {
-            withContext(Dispatchers.IO) {
+            val wasSignedIn = account.signedIn
+            val revoked = withContext(Dispatchers.IO) {
                 // Revoke the server session first: once the refresh token is wiped
                 // nothing on this phone could revoke it, and it stays valid for 30 days.
-                if (account.signedIn) account.logout()
+                val ok = if (wasSignedIn) account.logout() else true
                 repository.clearEveryAccountLocalData()
                 store.clearAll()
+                ok
             }
             account.clearLocalSession()
+            BubbleKeepAliveService.syncState(this@SetupActivity)
+            BubbleHealthJobService.sync(this@SetupActivity)
+            clearDetachedScreenReferences()
             screens.clear()
             contentHost.removeAllViews()
-            bottomNavigation.selectedItemId = TAB_HOME
+            activeTab = TAB_HOME
             showTab(TAB_HOME, animate = false)
+            bottomNavigation.selectedItemId = TAB_HOME
+            if (wasSignedIn && !revoked) {
+                Snackbar.make(
+                    contentHost,
+                    "Local data cleared, but the server session could not be revoked. It will expire on its own.",
+                    Snackbar.LENGTH_LONG,
+                ).show()
+            }
         }
     }
 
+    private fun clearDetachedScreenReferences() {
+        historyJob?.cancel()
+        historyJob = null
+        dictionaryJob?.cancel()
+        dictionaryJob = null
+        metricViews.clear()
+        readinessText = null
+        backgroundWarningCard = null
+        backgroundWarningText = null
+        aiInsightsText = null
+        usageTotalText = null
+        usageBreakdownText = null
+        recentContainer = null
+        periodSelector = null
+        historyAdapter = null
+        historyEmpty = null
+        historySearch = null
+        historyRecycler = null
+        dictionaryAdapter = null
+        dictionaryEmpty = null
+        dictionarySearch = null
+        dictionaryRecycler = null
+        dictionaryTabs = null
+        dictionaryAdapterConfirmed = null
+        microphoneStatus = null
+        keyboardStatus = null
+        accountStatus = null
+        accountQuota = null
+        accountButton = null
+        accountSignInHelp = null
+        accountRestrictionMessage = null
+        accountSignOutAction = null
+        accountDeleteAction = null
+        cloudSyncStatus = null
+        cloudSyncWarning = null
+        cloudSyncActions = emptyList()
+        historySyncSwitch = null
+        retentionAction = null
+        languageAction = null
+        polishAction = null
+        contextStatus = null
+        bubbleStatus = null
+        bubbleSwitch = null
+        keepAliveSwitch = null
+        backgroundAction = null
+    }
+
     private fun confirm(title: String, message: String, action: String, block: () -> Unit) {
+        if (!canShowDialog()) return
         MaterialAlertDialogBuilder(this)
             .setTitle(title)
             .setMessage(message)
@@ -1411,23 +1980,25 @@ class SetupActivity : AppCompatActivity() {
 
     private fun metric(key: String, label: String): MaterialCardView {
         val value = TextView(this).apply {
-            styleText(28f)
+            styleText(26f)
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             text = "—"
+            minHeight = dp(38)
         }
         val subtitle = TextView(this).apply { styleText(12.5f, MUTED) }
         metricViews[key] = value
         metricViews["$key-subtitle"] = subtitle
         return MaterialCardView(this).apply {
             radius = dp(18).toFloat(); cardElevation = 0f; setCardBackgroundColor(CARD); strokeWidth = dp(1); setStrokeColor(BORDER)
+            minimumHeight = dp(116)
             addView(LinearLayout(this@SetupActivity).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(15), dp(14), dp(12), dp(13))
+                setPadding(dp(15), dp(14), dp(12), dp(14))
                 addView(TextView(this@SetupActivity).apply {
                     text = label.uppercase(Locale.getDefault()); styleText(11.5f, MUTED)
                     typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 })
-                addView(value, linear(match = true, height = dp(42)).apply { topMargin = dp(5) })
+                addView(value, linear(match = true).apply { topMargin = dp(5); bottomMargin = dp(2) })
                 addView(subtitle)
             })
         }
@@ -1435,14 +2006,14 @@ class SetupActivity : AppCompatActivity() {
 
     private fun metricRow(first: View, second: View) = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
-        addView(first, LinearLayout.LayoutParams(0, dp(124), 1f).apply { rightMargin = dp(6) })
-        addView(second, LinearLayout.LayoutParams(0, dp(124), 1f).apply { leftMargin = dp(6) })
-        layoutParams = linear(match = true, height = dp(136))
+        addView(first, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(6) })
+        addView(second, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(6) })
+        layoutParams = linear(match = true).apply { bottomMargin = dp(12) }
     }
 
     private fun setMetric(key: String, value: String, subtitle: String) {
         metricViews[key]?.let { view ->
-            if (store.animationsEnabled && view.text != value) {
+            if (motionAllowed() && view.text != value) {
                 view.animate().cancel(); view.alpha = 0.2f; view.translationY = dp(4).toFloat()
                 view.text = value
                 view.animate().alpha(1f).translationY(0f).setDuration(180).start()
@@ -1454,41 +2025,78 @@ class SetupActivity : AppCompatActivity() {
     private fun hero(title: String, subtitle: String) = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = dp(68)
+        setPadding(0, dp(4), 0, dp(10))
         addView(ImageView(this@SetupActivity).apply {
             setImageResource(R.mipmap.ic_launcher); scaleType = ImageView.ScaleType.FIT_CENTER
-        }, linear(height = dp(54)).apply { width = dp(54) })
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, linear(height = dp(52)).apply { width = dp(52) })
         addView(LinearLayout(this@SetupActivity).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(this@SetupActivity).apply {
-                text = title; styleText(25f); typeface = Typeface.create("sans-serif", Typeface.BOLD)
+                text = title; styleText(24f); typeface = Typeface.create("sans-serif", Typeface.BOLD)
             })
-            addView(TextView(this@SetupActivity).apply { text = subtitle; styleText(13.5f, MUTED); maxLines = 2 })
-        }, LinearLayout.LayoutParams(0, dp(72), 1f).apply { leftMargin = dp(13) })
+            addView(TextView(this@SetupActivity).apply {
+                text = subtitle; styleText(13.5f, MUTED); maxLines = 3
+                setPadding(0, dp(2), 0, 0)
+            })
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(13) })
     }
 
-    private fun screenHeader(title: String, subtitle: String, action: String, onAction: () -> Unit) = LinearLayout(this).apply {
+    private fun screenHeader(
+        title: String,
+        subtitle: String,
+        action: String,
+        secondaryAction: String? = null,
+        onSecondaryAction: (() -> Unit)? = null,
+        onAction: () -> Unit,
+    ) = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = dp(68)
+        setPadding(0, dp(2), 0, dp(10))
         addView(LinearLayout(this@SetupActivity).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(this@SetupActivity).apply {
-                text = title; styleText(27f); typeface = Typeface.create("sans-serif", Typeface.BOLD)
+                text = title; styleText(26f); typeface = Typeface.create("sans-serif", Typeface.BOLD)
             })
-            addView(TextView(this@SetupActivity).apply { text = subtitle; styleText(13f, MUTED); maxLines = 2 })
-        }, LinearLayout.LayoutParams(0, dp(76), 1f))
-        addView(TextView(this@SetupActivity).apply {
-            text = action; styleText(14f, ACCENT); gravity = Gravity.CENTER
-            background = rounded(ACTION, dp(20).toFloat()); setOnClickListener { onAction() }
-        }, linear(height = dp(44)).apply { width = dp(76) })
+            addView(TextView(this@SetupActivity).apply {
+                text = subtitle; styleText(13f, MUTED); maxLines = 3
+                setPadding(0, dp(2), 0, 0)
+            })
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
+        if (secondaryAction != null && onSecondaryAction != null) {
+            addView(headerActionButton(secondaryAction, "$secondaryAction $title", onSecondaryAction), linear().apply { marginEnd = dp(8) })
+        }
+        addView(headerActionButton(action, "$action $title", onAction), linear())
+    }
+
+    private fun headerActionButton(label: String, description: String, onAction: () -> Unit) = TextView(this).apply {
+        text = label
+        contentDescription = description
+        styleText(14f, ACCENT)
+        gravity = Gravity.CENTER
+        minWidth = dp(68)
+        minHeight = dp(48)
+        setPadding(dp(14), dp(8), dp(14), dp(8))
+        background = rounded(ACTION, dp(20).toFloat())
+        setButtonAccessibilityRole()
+        setOnClickListener { onAction() }
     }
 
     private fun sectionHeader(title: String, action: String? = null, onAction: (() -> Unit)? = null) = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = dp(48)
+        setPadding(0, dp(4), 0, dp(4))
         addView(TextView(this@SetupActivity).apply {
             text = title; styleText(19f); typeface = Typeface.create("sans-serif", Typeface.BOLD); gravity = Gravity.CENTER_VERTICAL
-        }, LinearLayout.LayoutParams(0, dp(52), 1f))
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (action != null) addView(TextView(this@SetupActivity).apply {
-            text = action; styleText(14f, ACCENT); gravity = Gravity.CENTER; setOnClickListener { onAction?.invoke() }
-        }, linear(height = dp(48)).apply { width = dp(76) })
+            text = action; contentDescription = "$action $title"; styleText(14f, ACCENT); gravity = Gravity.CENTER
+            minWidth = dp(76); minHeight = dp(48)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            setButtonAccessibilityRole()
+            setOnClickListener { onAction?.invoke() }
+        }, linear())
     }
 
     private fun card(label: String, content: View) = MaterialCardView(this).apply {
@@ -1522,34 +2130,53 @@ class SetupActivity : AppCompatActivity() {
 
     private fun settingBlock(title: String, status: TextView, action: String, onAction: () -> Unit) = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = dp(62)
+        setPadding(0, dp(4), 0, dp(4))
         addView(LinearLayout(this@SetupActivity).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(this@SetupActivity).apply { text = title; styleText(15f) })
             addView(status)
-        }, LinearLayout.LayoutParams(0, dp(62), 1f))
-        addView(smallAction(action, onAction), linear(height = dp(40)).apply { width = dp(76) })
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(10) })
+        addView(smallAction(action, "$action $title", onAction), linear())
     }
 
     private fun settingAction(title: String, summary: String, action: String, onAction: () -> Unit) = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = dp(62)
+        setPadding(0, dp(4), 0, dp(4))
         addView(LinearLayout(this@SetupActivity).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(this@SetupActivity).apply { text = title; styleText(15f) })
-            addView(TextView(this@SetupActivity).apply { text = summary; styleText(12.5f, MUTED) })
-        }, LinearLayout.LayoutParams(0, dp(62), 1f))
-        addView(smallAction(action, onAction), linear(height = dp(40)).apply { width = dp(76) })
+            addView(TextView(this@SetupActivity).apply {
+                text = summary; styleText(12.5f, MUTED)
+                setPadding(0, dp(2), 0, 0)
+            })
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(10) })
+        addView(smallAction(action, "$action $title", onAction), linear())
     }
 
     private fun fixedSetting(title: String, value: String) = LinearLayout(this).apply {
         gravity = Gravity.CENTER_VERTICAL
-        addView(TextView(this@SetupActivity).apply { text = title; styleText(15f) }, LinearLayout.LayoutParams(0, dp(54), 1f).apply { gravity = Gravity.CENTER_VERTICAL })
-        addView(TextView(this@SetupActivity).apply { text = value; styleText(13f, MUTED); gravity = Gravity.CENTER_VERTICAL or Gravity.END }, linear(height = dp(54)).apply { width = dp(160) })
+        minimumHeight = dp(52)
+        setPadding(0, dp(6), 0, dp(6))
+        addView(
+            TextView(this@SetupActivity).apply { text = title; styleText(15f) },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                marginEnd = dp(10)
+            },
+        )
+        addView(
+            TextView(this@SetupActivity).apply { text = value; styleText(13f, MUTED); gravity = Gravity.CENTER_VERTICAL or Gravity.END },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f).apply { gravity = Gravity.CENTER_VERTICAL },
+        )
     }
 
     private fun settingSwitch(title: String, summary: String, checked: Boolean, onChanged: (Boolean) -> Unit) = SwitchMaterial(this).apply {
         text = "$title\n$summary"
         textSize = 14.5f; setTextColor(Color.WHITE); isChecked = checked
-        minHeight = dp(66); gravity = Gravity.CENTER_VERTICAL
+        minHeight = dp(64); gravity = Gravity.CENTER_VERTICAL
+        setPadding(0, dp(6), 0, dp(6))
         setOnCheckedChangeListener { _, value -> onChanged(value) }
     }
 
@@ -1557,18 +2184,30 @@ class SetupActivity : AppCompatActivity() {
         (getChildAt(1) as? TextView)?.setTextColor(ERROR)
     }
 
-    private fun smallAction(label: String, action: () -> Unit) = TextView(this).apply {
-        text = label; styleText(13.5f, ACCENT); gravity = Gravity.CENTER
-        background = rounded(ACTION, dp(18).toFloat()); setOnClickListener { action() }
+    private fun smallAction(label: String, description: String, action: () -> Unit) = TextView(this).apply {
+        text = label
+        contentDescription = description
+        styleText(13.5f, ACCENT)
+        gravity = Gravity.CENTER
+        minWidth = dp(76)
+        minHeight = dp(48)
+        setPadding(dp(14), dp(8), dp(14), dp(8))
+        background = rounded(ACTION, dp(20).toFloat())
+        setButtonAccessibilityRole()
+        setOnClickListener { action() }
     }
 
     private fun segmented(labels: List<String>, selected: Int, onSelected: (Int) -> Unit) = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL; setPadding(dp(3), dp(3), dp(3), dp(3)); background = rounded(SEGMENT, dp(16).toFloat())
+        minimumHeight = dp(50)
         labels.forEachIndexed { index, label ->
             addView(TextView(this@SetupActivity).apply {
                 text = label; gravity = Gravity.CENTER; styleText(if (labels.size > 3) 12.5f else 14f)
+                minHeight = dp(48)
+                setPadding(dp(6), dp(6), dp(6), dp(6))
+                setButtonAccessibilityRole()
                 setOnClickListener { onSelected(index) }
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
         post { styleSegmented(this, selected) }
     }
@@ -1576,6 +2215,7 @@ class SetupActivity : AppCompatActivity() {
     private fun styleSegmented(container: LinearLayout, selected: Int) {
         repeat(container.childCount) { index ->
             (container.getChildAt(index) as TextView).apply {
+                isSelected = index == selected
                 background = rounded(if (index == selected) SEGMENT_ACTIVE else Color.TRANSPARENT, dp(13).toFloat())
                 setTextColor(if (index == selected) Color.WHITE else MUTED)
             }
@@ -1585,12 +2225,19 @@ class SetupActivity : AppCompatActivity() {
     private fun recentPreview(record: DictationRecord) = MaterialCardView(this).apply {
         radius = dp(17).toFloat(); cardElevation = 0f; setCardBackgroundColor(CARD); strokeWidth = dp(1); setStrokeColor(BORDER)
         layoutParams = linear(match = true).apply { bottomMargin = dp(9) }
-        isClickable = true; setOnClickListener { showHistoryDetail(record) }
+        isClickable = true
+        contentDescription = "Dictation from ${historyDateTime(record)}: ${record.finalText.take(60)}. Open details"
+        setButtonAccessibilityRole()
+        setOnClickListener { showHistoryDetail(record) }
         addView(LinearLayout(this@SetupActivity).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dp(15), dp(13), dp(15), dp(13))
-            addView(TextView(this@SetupActivity).apply { text = record.finalText; styleText(15f); maxLines = 3 })
             addView(TextView(this@SetupActivity).apply {
-                text = "${historyDateTime(record)}  •  ${record.wordCount} words"; styleText(12f, MUTED); setPadding(0, dp(6), 0, 0)
+                text = record.finalText; styleText(15f); maxLines = 3; ellipsize = TextUtils.TruncateAt.END
+            })
+            addView(TextView(this@SetupActivity).apply {
+                text = "${historyDateTime(record)}  •  ${formatWordCount(record.wordCount)}"
+                styleText(12f, MUTED)
+                setPadding(0, dp(6), 0, 0)
             })
         })
     }
@@ -1604,18 +2251,22 @@ class SetupActivity : AppCompatActivity() {
     }
 
     private fun searchField(hintText: String) = input(hintText, InputType.TYPE_CLASS_TEXT).apply {
-        setSingleLine(true); compoundDrawablePadding = dp(8)
+        setSingleLine(true)
+        compoundDrawablePadding = dp(8)
+        minHeight = dp(52)
     }
 
     private fun input(hintText: String, type: Int) = EditText(this).apply {
         hint = hintText; inputType = type; textSize = 15f; setTextColor(Color.WHITE); setHintTextColor(MUTED)
+        minHeight = dp(50)
         setPadding(dp(14), dp(10), dp(14), dp(10)); background = rounded(INPUT, dp(14).toFloat()); maxLines = 6
     }
 
     private fun actionButton(label: String, action: () -> Unit) = Button(this).apply {
         text = label; isAllCaps = false; textSize = 14.5f; setTextColor(Color.WHITE)
+        minHeight = dp(50)
         backgroundTintList = ColorStateList.valueOf(Color.rgb(79, 70, 123)); setOnClickListener { action() }
-        layoutParams = linear(match = true, height = dp(50)).apply { topMargin = dp(7) }
+        layoutParams = linear(match = true).apply { topMargin = dp(7) }
     }
 
     private fun statusText() = TextView(this).apply { styleText(12.5f, MUTED); setPadding(0, dp(3), 0, dp(3)) }
@@ -1635,6 +2286,28 @@ class SetupActivity : AppCompatActivity() {
         arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
         intArrayOf(ACCENT, MUTED),
     )
+
+    private fun languageLabel(code: String): String =
+        LANGUAGE_OPTIONS.firstOrNull { it.first == code }?.second ?: code
+
+    private fun polishLabel(code: String): String =
+        POLISH_OPTIONS.firstOrNull { it.first == code }?.second ?: code
+
+    private fun formatWordCount(count: Int): String = if (count == 1) "1 word" else "$count words"
+
+    private fun formatQuotaReset(resetAtMs: Long): String? {
+        if (resetAtMs <= 0L) return null
+        val remainingMs = resetAtMs - System.currentTimeMillis()
+        if (remainingMs <= 0L) return "Resets soon"
+        val totalMinutes = (remainingMs + 59_999L) / 60_000L
+        val hours = totalMinutes / 60L
+        val minutes = totalMinutes % 60L
+        return when {
+            hours > 0L && minutes > 0L -> "Resets in ${hours}h ${minutes}m"
+            hours > 0L -> "Resets in ${hours}h"
+            else -> "Resets in ${minutes}m"
+        }
+    }
 
     private fun statusLine(ready: Boolean, yes: String, no: String) = if (ready) "✓  $yes" else "○  $no"
     private fun formatDuration(ms: Long): String = when {
@@ -1678,6 +2351,30 @@ class SetupActivity : AppCompatActivity() {
         const val STATE_TAB = "dashboard_tab"
         const val STATE_PERIOD = "analytics_period"
         const val POLICY_VERSION = "2026-09-26-cloud-sync"
+        const val UNDO_HOLD_MS = 8_000L
+
+        val LANGUAGE_OPTIONS = listOf(
+            "auto" to "Auto-detect",
+            "en-IN" to "English (India)",
+            "en-US" to "English (US)",
+            "en-GB" to "English (UK)",
+            "hi-IN" to "Hindi (India)",
+            "bn-IN" to "Bengali (India)",
+            "es-ES" to "Spanish",
+            "fr-FR" to "French",
+            "de-DE" to "German",
+            "ja-JP" to "Japanese",
+            "zh-CN" to "Chinese (Simplified)",
+            "ar-SA" to "Arabic",
+            "pt-BR" to "Portuguese (Brazil)",
+        )
+
+        val POLISH_OPTIONS = listOf(
+            "off" to "Off (raw transcript)",
+            "light" to "Light (grammar & punctuation)",
+            "strong" to "Strong (cleaner phrasing)",
+        )
+
         val BACKGROUND = Color.rgb(23, 22, 27)
         val NAVIGATION = Color.rgb(29, 28, 34)
         val CARD = Color.rgb(36, 35, 41)

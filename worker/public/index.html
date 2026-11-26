@@ -14,6 +14,7 @@
   <script src="/landing.js" defer></script>
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
 
   <header class="nav" id="top">
@@ -21,7 +22,7 @@
       <img src="/media/logo.svg" width="32" height="32" alt="">
       <span>LiVoice</span>
     </a>
-    <nav aria-label="Sections">
+    <nav id="site-nav" aria-label="Sections">
       <a href="#how">How it works</a>
       <a href="#mac">Mac</a>
       <a href="#android">Android</a>
@@ -30,9 +31,14 @@
       <a href="#faq">FAQ</a>
     </nav>
     <a class="pill-button" href="#download">Download</a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation menu">
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+    </button>
   </header>
 
-  <main>
+  <main id="main">
     <!-- Hero -->
     <section class="hero">
       <div class="hero-copy">
@@ -148,15 +154,24 @@
         <a class="text-link reveal" href="/download/mac">Download for macOS →</a>
       </div>
       <div class="mac-showcase reveal" data-showcase>
-        <div class="tabs" role="tablist" aria-label="Mac app screens">
-          <button role="tab" aria-selected="true" aria-controls="mac-shot-home" data-tab="home">Home</button>
-          <button role="tab" aria-selected="false" aria-controls="mac-shot-history" data-tab="history">History</button>
-          <button role="tab" aria-selected="false" aria-controls="mac-shot-settings" data-tab="settings">Settings</button>
+        <div class="showcase-controls">
+          <div class="tabs" role="tablist" aria-label="Mac app screens">
+            <button id="mac-tab-home" type="button" role="tab" aria-selected="true" aria-controls="mac-shot-home" tabindex="0" data-tab="home">Home</button>
+            <button id="mac-tab-history" type="button" role="tab" aria-selected="false" aria-controls="mac-shot-history" tabindex="-1" data-tab="history">History</button>
+            <button id="mac-tab-settings" type="button" role="tab" aria-selected="false" aria-controls="mac-shot-settings" tabindex="-1" data-tab="settings">Settings</button>
+          </div>
+          <button class="pause-button" type="button" data-showcase-pause aria-pressed="false" aria-label="Pause Mac screen rotation">Pause</button>
         </div>
         <div class="mac-frame" data-tilt>
-          <img id="mac-shot-home" class="shot is-active" data-shot="home" src="/media/mac-home.png" width="1065" height="765" alt="LiVoice Home on Mac: today's dictations, time, words, speaking pace, and recent dictations">
-          <img id="mac-shot-history" class="shot" data-shot="history" src="/media/mac-history.png" width="1060" height="760" loading="lazy" alt="LiVoice History on Mac with search, copy, and delete">
-          <img id="mac-shot-settings" class="shot shot-tall" data-shot="settings" src="/media/mac-settings.png" width="1049" height="1269" loading="lazy" alt="LiVoice Settings on Mac with trigger key, permissions, and startup options">
+          <div id="mac-shot-home" class="shot is-active" role="tabpanel" aria-labelledby="mac-tab-home" data-shot="home">
+            <img src="/media/mac-home.png" width="1065" height="765" alt="LiVoice Home on Mac: today's dictations, time, words, speaking pace, and recent dictations">
+          </div>
+          <div id="mac-shot-history" class="shot" role="tabpanel" aria-labelledby="mac-tab-history" hidden data-shot="history">
+            <img src="/media/mac-history.png" width="1060" height="760" loading="lazy" alt="LiVoice History on Mac with search, copy, and delete">
+          </div>
+          <div id="mac-shot-settings" class="shot shot-tall" role="tabpanel" aria-labelledby="mac-tab-settings" hidden data-shot="settings">
+            <img src="/media/mac-settings.png" width="1049" height="1269" loading="lazy" alt="LiVoice Settings on Mac with trigger key, permissions, and startup options">
+          </div>
         </div>
         <img class="float-bubble" src="/media/mac-recording-bubble.png" width="482" height="107" alt="The LiVoice recording bubble: Listening, release Option to transcribe">
       </div>
@@ -178,12 +193,19 @@
       </div>
       <div class="phone-stage reveal">
         <div class="phone phone-back"><img src="/media/wovoice-dictionary.png" width="720" height="1600" loading="lazy" alt="LiVoice Dictionary screen on Android"></div>
-        <div class="phone phone-front" data-carousel>
+        <div class="phone phone-front" data-carousel aria-roledescription="carousel" aria-label="Android app screens">
           <img class="slide is-active" src="/media/wovoice-home.png" width="720" height="1600" loading="lazy" alt="LiVoice Home dashboard on Android">
           <img class="slide" src="/media/keyboard-recording.png" width="720" height="1600" loading="lazy" alt="LiVoice keyboard recording speech with a live waveform">
           <img class="slide" src="/media/wovoice-dictionary.png" width="720" height="1600" loading="lazy" alt="LiVoice Dictionary with saved names and terms">
         </div>
-        <div class="dots" data-carousel-dots aria-hidden="true"><i class="is-active"></i><i></i><i></i></div>
+        <div class="carousel-controls">
+          <div class="dots" data-carousel-dots role="tablist" aria-label="Choose Android screen">
+            <button type="button" class="is-active" role="tab" aria-selected="true" aria-label="Android Home dashboard"></button>
+            <button type="button" role="tab" aria-selected="false" aria-label="Android recording keyboard"></button>
+            <button type="button" role="tab" aria-selected="false" aria-label="Android Personal Dictionary"></button>
+          </div>
+          <button class="pause-button" type="button" data-carousel-pause aria-pressed="false" aria-label="Pause Android screenshot carousel">Pause</button>
+        </div>
       </div>
     </section>
 
@@ -249,7 +271,7 @@
           <h2>Your voice is never stored.</h2>
           <ul class="privacy-list">
             <li><b>Recordings are deleted</b> as soon as your text is ready.</li>
-            <li><b>Only what you dictate is sent</b> — never the surrounding text, your clipboard, contacts, or which app you're in.</li>
+            <li><b>Automatic context is opt-in and off by default</b> — your clipboard, contacts, and app identifiers never leave your device, and optional nearby text is only sent transiently if you explicitly turn it on.</li>
             <li><b>Synced data is encrypted</b> with a key unique to your account.</li>
             <li><b>No ads, no tracking,</b> and no crash-reporting tools.</li>
           </ul>
@@ -265,15 +287,24 @@
       <p class="section-lead reveal">LiVoice is run from a small admin console. These are real screenshots of it, with the administrator's email blurred — so you can see exactly what the team behind LiVoice can and can't see.</p>
       <div class="transparency-grid">
         <div class="admin-showcase reveal" data-showcase>
-          <div class="tabs" role="tablist" aria-label="Admin console screens">
-            <button role="tab" aria-selected="true" aria-controls="admin-shot-overview" data-tab="overview">Overview</button>
-            <button role="tab" aria-selected="false" aria-controls="admin-shot-user" data-tab="user">A user</button>
-            <button role="tab" aria-selected="false" aria-controls="admin-shot-audit" data-tab="audit">Audit log</button>
+          <div class="showcase-controls">
+            <div class="tabs" role="tablist" aria-label="Admin console screens">
+              <button id="admin-tab-overview" type="button" role="tab" aria-selected="true" aria-controls="admin-shot-overview" tabindex="0" data-tab="overview">Overview</button>
+              <button id="admin-tab-user" type="button" role="tab" aria-selected="false" aria-controls="admin-shot-user" tabindex="-1" data-tab="user">A user</button>
+              <button id="admin-tab-audit" type="button" role="tab" aria-selected="false" aria-controls="admin-shot-audit" tabindex="-1" data-tab="audit">Audit log</button>
+            </div>
+            <button class="pause-button" type="button" data-showcase-pause aria-pressed="false" aria-label="Pause admin console rotation">Pause</button>
           </div>
           <div class="admin-frame" data-tilt>
-            <img id="admin-shot-overview" class="shot is-active" data-shot="overview" src="/media/admin-overview.webp" width="1530" height="1218" loading="lazy" alt="Admin overview: users, successful dictations, minutes of voice processed, estimated AI cost, and the free service budget">
-            <img id="admin-shot-user" class="shot" data-shot="user" src="/media/admin-user.webp" width="1538" height="1216" loading="lazy" alt="Admin user page: account status, usage, synced record counts, recent activity, and signed-in devices">
-            <img id="admin-shot-audit" class="shot" data-shot="audit" src="/media/admin-audit.webp" width="1525" height="1207" loading="lazy" alt="Admin audit log listing every administrator sign-in and action">
+            <div id="admin-shot-overview" class="shot is-active" role="tabpanel" aria-labelledby="admin-tab-overview" data-shot="overview">
+              <img src="/media/admin-overview.webp" width="1530" height="1218" loading="lazy" alt="Admin overview: users, successful dictations, minutes of voice processed, estimated AI cost, and the free service budget">
+            </div>
+            <div id="admin-shot-user" class="shot" role="tabpanel" aria-labelledby="admin-tab-user" hidden data-shot="user">
+              <img src="/media/admin-user.webp" width="1538" height="1216" loading="lazy" alt="Admin user page: account status, usage, synced record counts, recent activity, and signed-in devices">
+            </div>
+            <div id="admin-shot-audit" class="shot" role="tabpanel" aria-labelledby="admin-tab-audit" hidden data-shot="audit">
+              <img src="/media/admin-audit.webp" width="1525" height="1207" loading="lazy" alt="Admin audit log listing every administrator sign-in and action">
+            </div>
           </div>
         </div>
         <div class="visibility">
@@ -315,10 +346,10 @@
 
     <!-- Numbers -->
     <section class="section stats">
-      <div class="stat reveal"><b data-count="10">0</b><span>free minutes<br>every day</span></div>
-      <div class="stat reveal"><b data-count="60">0</b><span>seconds per<br>recording</span></div>
-      <div class="stat reveal"><b data-count="1000">0</b><span>Dictionary<br>terms</span></div>
-      <div class="stat reveal"><b data-count="2">0</b><span>platforms,<br>one account</span></div>
+      <div class="stat reveal"><b data-count="10">10</b><span>free minutes<br>every day</span></div>
+      <div class="stat reveal"><b data-count="60">60</b><span>seconds per<br>recording</span></div>
+      <div class="stat reveal"><b data-count="1000">1,000</b><span>Dictionary<br>terms</span></div>
+      <div class="stat reveal"><b data-count="3">3</b><span>platforms,<br>one account</span></div>
     </section>
 
     <!-- FAQ -->

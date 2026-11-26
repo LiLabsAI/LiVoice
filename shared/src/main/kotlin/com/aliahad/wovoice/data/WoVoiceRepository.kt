@@ -7,11 +7,55 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
+
+/**
+ * In-memory hold window for pending deletions (e.g. while an Undo Snackbar is
+ * visible) so an immediate background sync cannot upload a tombstone before the
+ * user has a chance to tap Undo. Holds expire automatically after [holdUntilMs]
+ * so a process or UI failure can never stall deletions permanently.
+ */
+class DeletionHold {
+    private val holds = ConcurrentHashMap<String, Long>()
+
+    fun hold(accountId: String, type: String, recordId: String, holdUntilMs: Long) {
+        if (accountId.isBlank() || recordId.isBlank()) return
+        holds[key(accountId, type, recordId)] = holdUntilMs
+    }
+
+    fun release(accountId: String, type: String, recordId: String) {
+        if (accountId.isBlank() || recordId.isBlank()) return
+        holds.remove(key(accountId, type, recordId))
+    }
+
+    fun isHeld(accountId: String, type: String, recordId: String, nowMs: Long): Boolean {
+        val k = key(accountId, type, recordId)
+        val until = holds[k] ?: return false
+        if (nowMs >= until) {
+            holds.remove(k, until)
+            return false
+        }
+        return true
+    }
+
+    fun clearAccount(accountId: String) {
+        val prefix = "$accountId|"
+        holds.keys.removeIf { it.startsWith(prefix) }
+    }
+
+    private fun key(accountId: String, type: String, recordId: String) = "$accountId|$type|$recordId"
+
+    companion object {
+        val Shared = DeletionHold()
+    }
+}
 
 class WoVoiceRepository(
     private val dao: WoVoiceDao,
     private val settings: AccountSettings,
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val deletionHold: DeletionHold = DeletionHold.Shared,
 ) {
     private fun owner(): String? = settings.accountId
 
@@ -86,36 +130,51 @@ class WoVoiceRepository(
         dao.recordSuccess(record, aggregate, event, keepHistory)
     }
 
-    suspend fun dashboard(period: AnalyticsPeriod): DashboardSnapshot = DashboardSnapshot(
-        aggregates = dao.usageSince(owner(), period.sinceMs()),
-        recent = dao.recent(owner(), 3),
-    )
+    suspend fun dashboard(period: AnalyticsPeriod): DashboardSnapshot {
+        pruneExpiredHistoryIfNeeded()
+        return DashboardSnapshot(
+            aggregates = dao.usageSince(owner(), period.sinceMs()),
+            recent = dao.recent(owner(), 3),
+        )
+    }
 
     suspend fun metricsSince(sinceMs: Long): DashboardMetrics = metrics(dao.usageSince(owner(), sinceMs))
 
-    suspend fun history(query: String = ""): List<DictationRecord> = dao.history(owner(), escapeLike(query.trim()))
-
-    suspend fun deleteHistory(record: DictationRecord) {
-        queueTombstone(record.ownerAccountId, "history", record.syncId, record.syncVersion)
-        dao.deleteRecord(record)
+    suspend fun history(query: String = ""): List<DictationRecord> {
+        pruneExpiredHistoryIfNeeded()
+        return dao.history(owner(), escapeLike(query.trim()))
     }
+
+    suspend fun deleteHistory(record: DictationRecord, holdWindowMs: Long = 0L) {
+        val ownerAccountId = record.ownerAccountId
+        if (holdWindowMs > 0L && !ownerAccountId.isNullOrBlank() && record.syncId.isNotBlank()) {
+            deletionHold.hold(ownerAccountId, "history", record.syncId, clock() + holdWindowMs)
+        }
+        val tombstone = tombstoneFor(ownerAccountId, "history", record.syncId, record.syncVersion)
+        dao.deleteHistoryWithTombstone(record, tombstone)
+    }
+
+    fun releaseHistoryDeleteHold(record: DictationRecord) {
+        val ownerAccountId = record.ownerAccountId ?: return
+        if (record.syncId.isNotBlank()) {
+            deletionHold.release(ownerAccountId, "history", record.syncId)
+        }
+    }
+
     suspend fun restoreHistory(record: DictationRecord) {
         val restored = record.copy(syncState = SYNC_LOCAL)
-        dao.restoreRecord(restored)
-        record.ownerAccountId?.let { dao.deleteOutboxRecord(it, "history", record.syncId) }
+        dao.restoreHistoryClearingTombstone(restored)
+        releaseHistoryDeleteHold(record)
     }
+
     suspend fun clearHistory() {
-        dao.history(owner(), "").forEach { deleteHistory(it) }
-    }
-    suspend fun resetAnalytics() {
         val ownerAccountId = owner()
-        dao.resetAnalytics(ownerAccountId)
-        if (ownerAccountId != null) {
-            dao.analyticsEvents(ownerAccountId).forEach {
-                queueTombstone(ownerAccountId, "analytics", it.syncId, it.syncVersion)
-            }
-            dao.deleteAnalyticsEvents(ownerAccountId)
-        }
+        if (!ownerAccountId.isNullOrBlank()) deletionHold.clearAccount(ownerAccountId)
+        dao.clearHistoryWithTombstones(ownerAccountId, clock())
+    }
+
+    suspend fun resetAnalytics() {
+        dao.resetAnalyticsWithTombstones(owner(), clock())
     }
 
     suspend fun dictionary(confirmed: Boolean, query: String = ""): List<DictionaryEntry> =
@@ -142,7 +201,7 @@ class WoVoiceRepository(
             entry.copy(
                 status = DictionaryEntry.STATUS_CONFIRMED,
                 source = DictionaryEntry.SOURCE_LEARNED,
-                lastUsedAtMs = System.currentTimeMillis(),
+                lastUsedAtMs = clock(),
                 syncState = SYNC_LOCAL,
             ),
         )
@@ -157,7 +216,7 @@ class WoVoiceRepository(
             entry.copy(
                 term = cleaned,
                 normalizedTerm = normalized,
-                lastUsedAtMs = System.currentTimeMillis(),
+                lastUsedAtMs = clock(),
                 syncState = SYNC_LOCAL,
             ),
         )
@@ -165,12 +224,15 @@ class WoVoiceRepository(
     }
 
     suspend fun deleteDictionary(entry: DictionaryEntry) {
-        queueTombstone(entry.ownerAccountId, "dictionary", entry.syncId, entry.syncVersion)
-        dao.deleteDictionary(entry)
+        // Only confirmed entries are synced to cloud; never queue tombstones for suggestions.
+        val tombstone = if (entry.isConfirmed) {
+            tombstoneFor(entry.ownerAccountId, "dictionary", entry.syncId, entry.syncVersion)
+        } else null
+        dao.deleteDictionaryWithTombstone(entry, tombstone)
     }
+
     suspend fun clearDictionary() {
-        dao.dictionary(owner(), DictionaryEntry.STATUS_CONFIRMED, "").forEach { deleteDictionary(it) }
-        dao.dictionary(owner(), DictionaryEntry.STATUS_SUGGESTED, "").forEach { deleteDictionary(it) }
+        dao.clearDictionaryWithTombstones(owner(), clock())
     }
 
     suspend fun bestGlossary(): List<String> = dao.bestDictionary(owner(), 100).map(DictionaryEntry::term)
@@ -201,6 +263,12 @@ class WoVoiceRepository(
         values.forEach { addTerm(it, DictionaryEntry.STATUS_CONFIRMED, DictionaryEntry.SOURCE_IMPORTED) }
     }
 
+    private suspend fun pruneExpiredHistoryIfNeeded() {
+        val ownerAccountId = owner() ?: return
+        val days = settings.historyRetentionDays?.takeIf { it > 0 } ?: return
+        dao.deleteHistoryBefore(ownerAccountId, clock() - days * DAY_MS)
+    }
+
     private suspend fun addTerm(term: String, status: String, source: String): Boolean {
         val cleaned = cleanTerm(term) ?: return false
         val normalized = normalize(cleaned)
@@ -214,7 +282,7 @@ class WoVoiceRepository(
             return false
         }
         if (dao.dictionaryCount(ownerAccountId) >= MAX_DICTIONARY_TERMS) return false
-        val now = System.currentTimeMillis()
+        val now = clock()
         return dao.insertDictionary(
             DictionaryEntry(
                 term = cleaned,
@@ -236,35 +304,38 @@ class WoVoiceRepository(
 
     suspend fun deleteUnassigned() = dao.deleteUnassigned()
 
-    suspend fun deleteAccountLocalData(accountId: String) = dao.deleteAccountPartition(accountId)
-
-    suspend fun clearEveryAccountLocalData() {
-        dao.clearAllHistory()
-        dao.clearAllUsage()
-        dao.clearAllDictionary()
-        dao.clearAllAnalyticsEvents()
-        dao.clearAllOutbox()
+    suspend fun deleteAccountLocalData(accountId: String) {
+        deletionHold.clearAccount(accountId)
+        dao.deleteAccountPartition(accountId)
     }
 
-    private suspend fun queueTombstone(ownerAccountId: String?, type: String, syncId: String, version: Int) {
-        if (ownerAccountId.isNullOrBlank() || syncId.isBlank()) return
-        dao.upsertOutbox(
-            EncryptedSyncOutboxItem(
-                ownerAccountId = ownerAccountId,
-                recordType = type,
-                recordId = syncId,
-                baseVersion = version,
-                keyVersion = 1,
-                nonce = "",
-                ciphertext = "",
-                deleted = true,
-                createdAtMs = System.currentTimeMillis(),
-            ),
+    suspend fun clearEveryAccountLocalData() {
+        dao.clearEveryAccountLocalData()
+    }
+
+    private fun tombstoneFor(
+        ownerAccountId: String?,
+        type: String,
+        syncId: String,
+        version: Int,
+    ): EncryptedSyncOutboxItem? {
+        if (ownerAccountId.isNullOrBlank() || syncId.isBlank()) return null
+        return EncryptedSyncOutboxItem(
+            ownerAccountId = ownerAccountId,
+            recordType = type,
+            recordId = syncId,
+            baseVersion = version,
+            keyVersion = 1,
+            nonce = "",
+            ciphertext = "",
+            deleted = true,
+            createdAtMs = clock(),
         )
     }
 
     companion object {
         private const val MAX_DICTIONARY_TERMS = 1_000
+        private const val DAY_MS = 86_400_000L
 
         fun metrics(values: List<DailyUsageAggregate>): DashboardMetrics {
             val dictations = values.sumOf(DailyUsageAggregate::dictationCount)

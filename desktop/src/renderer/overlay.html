@@ -5,7 +5,7 @@
     <title>LiVoice</title>
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob:"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; connect-src 'none'"
     />
     <style>
       html,
@@ -24,7 +24,7 @@
         display: flex;
         align-items: flex-start;
         justify-content: center;
-        padding-top: 8px;
+        padding: 8px 12px 0;
         box-sizing: border-box;
       }
 
@@ -33,14 +33,15 @@
         display: flex;
         align-items: center;
         gap: 12px;
-        max-width: 548px;
+        max-width: 556px;
         min-height: 58px;
+        max-height: 142px;
         padding: 12px 16px;
         border-radius: 18px;
-        background: rgba(18, 18, 22, 0.82);
+        background: rgba(18, 18, 22, 0.86);
         -webkit-backdrop-filter: blur(24px) saturate(1.4);
         backdrop-filter: blur(24px) saturate(1.4);
-        border: 1px solid rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(255, 255, 255, 0.14);
         box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
         color: #f5f4f7;
         opacity: 0;
@@ -62,10 +63,10 @@
           transform 0.3s ease;
       }
       .pill[data-tone='error'] {
-        border-color: rgba(255, 176, 82, 0.45);
+        border-color: rgba(255, 176, 82, 0.5);
       }
       .pill[data-tone='success'] {
-        border-color: rgba(125, 228, 182, 0.4);
+        border-color: rgba(125, 228, 182, 0.45);
       }
 
       /* ---- recording dot ---- */
@@ -117,7 +118,7 @@
         display: none;
         font-variant-numeric: tabular-nums;
         font-size: 12px;
-        color: rgba(245, 244, 247, 0.6);
+        color: rgba(245, 244, 247, 0.65);
         flex: none;
       }
       body[data-state='recording'] .timer,
@@ -133,7 +134,7 @@
       .state-line {
         font-size: 13px;
         font-weight: 500;
-        line-height: 1.35;
+        line-height: 1.38;
         display: flex;
         align-items: center;
         gap: 8px;
@@ -143,9 +144,9 @@
       }
       .sub-line {
         display: none;
-        margin-top: 2px;
+        margin-top: 3px;
         font-size: 11.5px;
-        color: rgba(245, 244, 247, 0.55);
+        color: rgba(245, 244, 247, 0.65);
         line-height: 1.35;
       }
       body[data-state='recording'] .sub-line,
@@ -156,16 +157,20 @@
       body[data-state='success'] .state-line,
       body[data-state='error'] .state-line {
         white-space: normal;
-        display: block;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        word-break: break-word;
       }
 
       /* processing shimmer on the state text */
       body[data-state='processing'] .state-line {
         background: linear-gradient(
           90deg,
-          rgba(245, 244, 247, 0.55) 0%,
+          rgba(245, 244, 247, 0.6) 0%,
           #ffffff 45%,
-          rgba(245, 244, 247, 0.55) 90%
+          rgba(245, 244, 247, 0.6) 90%
         );
         background-size: 200% 100%;
         -webkit-background-clip: text;
@@ -297,47 +302,83 @@
         height: 24px;
         border: none;
         border-radius: 50%;
-        background: rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.14);
         color: #f5f4f7;
         font-size: 12px;
         cursor: pointer;
         flex: none;
         padding: 0;
+        align-items: center;
+        justify-content: center;
       }
       .close:hover {
-        background: rgba(255, 255, 255, 0.22);
+        background: rgba(255, 255, 255, 0.26);
+      }
+      .close:focus-visible {
+        outline: 2px solid #aea3ff;
+        outline-offset: 2px;
       }
       body[data-state='recording'] .close,
+      body[data-state='processing'] .close,
       body[data-state='error'] .close {
-        display: block;
+        display: flex;
       }
 
       kbd {
         display: inline-block;
         padding: 0 5px;
         border-radius: 5px;
-        border: 1px solid rgba(255, 255, 255, 0.22);
-        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.24);
+        background: rgba(255, 255, 255, 0.1);
         font-family: inherit;
         font-size: 10.5px;
         line-height: 15px;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .pill,
+        .pill.closing,
+        .bar {
+          transition: none !important;
+        }
+        .rec-dot,
+        .dots i,
+        body[data-state='success'] .check,
+        body[data-state='error'] .pill {
+          animation: none !important;
+        }
+        body[data-state='processing'] .state-line {
+          animation: none !important;
+          background: none;
+          -webkit-background-clip: border-box;
+          background-clip: border-box;
+          color: #f5f4f7;
+        }
       }
     </style>
   </head>
   <body data-state="idle">
     <div class="stage">
-      <div class="pill" id="pill">
-        <div class="rec-dot" id="recDot"></div>
-        <div class="bars" id="bars"></div>
-        <div class="check" id="check">✓</div>
-        <div class="warn-icon" id="warn">⚠️</div>
-        <div class="dots" id="dots"><i></i><i></i><i></i></div>
+      <div class="pill" id="pill" role="status" aria-live="polite" aria-atomic="true">
+        <div class="rec-dot" id="recDot" aria-hidden="true"></div>
+        <div class="bars" id="bars" aria-hidden="true"></div>
+        <div class="check" id="check" aria-hidden="true">✓</div>
+        <div class="warn-icon" id="warn" aria-hidden="true">⚠️</div>
+        <div class="dots" id="dots" aria-hidden="true"><i></i><i></i><i></i></div>
         <div class="content">
           <div class="state-line" id="stateLine">Listening…</div>
           <div class="sub-line" id="subLine"></div>
         </div>
         <div class="timer" id="timer">0:00</div>
-        <button class="close" id="cancel" title="Cancel dictation">✕</button>
+        <button
+          class="close"
+          id="cancel"
+          type="button"
+          title="Cancel dictation"
+          aria-label="Cancel dictation"
+        >
+          ✕
+        </button>
       </div>
     </div>
     <script type="module" src="/src/overlay/overlay.ts"></script>

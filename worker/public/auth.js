@@ -9,6 +9,8 @@ let challengeId = "";
 let widgetId = null;
 let resolveTurnstile;
 let turnstileLoaded = false;
+let resendTimerId = null;
+let resendRemaining = 0;
 
 const turnstileReady = new Promise((resolve) => {
   resolveTurnstile = resolve;
@@ -43,12 +45,51 @@ const serviceErrorStep = document.querySelector("#service-error-step");
 const emailForm = document.querySelector("#email-form");
 const codeForm = document.querySelector("#code-form");
 const sendButton = document.querySelector("#send");
+const resendButton = document.querySelector("#resend");
 
 const setStatus = (id, message, error = false) => {
   const node = document.querySelector(id);
   if (!node) return;
   node.textContent = message;
   node.classList.toggle("error", error);
+};
+
+const clearResendCountdown = () => {
+  if (resendTimerId !== null) {
+    clearInterval(resendTimerId);
+    resendTimerId = null;
+  }
+  resendRemaining = 0;
+};
+
+const startResendCountdown = (seconds = 60) => {
+  clearResendCountdown();
+  resendRemaining = Math.max(1, Math.round(seconds));
+  const update = () => {
+    if (!resendButton) return;
+    if (resendRemaining > 0) {
+      resendButton.disabled = true;
+      resendButton.textContent = `Resend code (${resendRemaining}s)`;
+    } else {
+      resendButton.disabled = false;
+      resendButton.textContent = "Resend code";
+      clearResendCountdown();
+    }
+  };
+  update();
+  resendTimerId = setInterval(() => {
+    resendRemaining -= 1;
+    update();
+  }, 1000);
+};
+
+const resetTurnstileWidget = (statusMessage = "Complete the security check again.") => {
+  turnstileToken = "";
+  if (sendButton) sendButton.disabled = true;
+  if (widgetId !== null && typeof window.turnstile?.reset === "function") {
+    window.turnstile.reset(widgetId);
+    setStatus("#security-status", statusMessage);
+  }
 };
 
 const post = async (path, body) => {
@@ -65,6 +106,10 @@ const post = async (path, body) => {
 
 const showServiceError = (error) => {
   console.error("LiVoice sign-in initialization failed", error);
+  const messageNode = document.querySelector("#service-error-message");
+  if (messageNode && error instanceof Error && error.message) {
+    messageNode.textContent = error.message;
+  }
   emailStep?.classList.add("hidden");
   codeStep?.classList.add("hidden");
   invalidStep?.classList.add("hidden");
@@ -143,13 +188,12 @@ emailForm?.addEventListener("submit", async (event) => {
     document.querySelector("#sent-to").textContent = `Enter the code sent to ${email}. It expires in 10 minutes.`;
     emailStep.classList.add("hidden");
     codeStep.classList.remove("hidden");
+    setStatus("#code-status", "");
+    startResendCountdown(typeof result.resendAfter === "number" ? result.resendAfter : 60);
     document.querySelector("#code").focus();
   } catch (error) {
     setStatus("#email-status", error.message, true);
-    turnstileToken = "";
-    if (widgetId !== null && typeof window.turnstile?.reset === "function") {
-      window.turnstile.reset(widgetId);
-    }
+    resetTurnstileWidget("Complete the security check again.");
   } finally {
     if (turnstileToken) sendButton.disabled = false;
   }
@@ -166,12 +210,19 @@ codeForm?.addEventListener("submit", async (event) => {
       code: document.querySelector("#code").value.trim(),
     });
     const desktopPort = params.get("redirect_port");
+    const parsedPort = Number(desktopPort);
     let target;
     if (params.get("platform") === "ios") {
       // Fixed callback scheme only; no caller-supplied redirect URL. The iOS
       // system authentication session receives this PKCE-bound code + state.
       target = new URL("wovoice-ios://callback");
-    } else if (params.get("platform") === "desktop" && /^\d{4,5}$/.test(desktopPort)) {
+    } else if (
+      params.get("platform") === "desktop"
+      && desktopPort !== null
+      && /^\d{4,5}$/.test(desktopPort)
+      && parsedPort >= 1024
+      && parsedPort <= 65535
+    ) {
       // Desktop clients listen on a loopback port; the PKCE verifier never
       // leaves the app, so the code is useless to anything intercepting it.
       target = new URL(`http://127.0.0.1:${desktopPort}/callback`);
@@ -188,6 +239,20 @@ codeForm?.addEventListener("submit", async (event) => {
     setStatus("#code-status", error.message, true);
     button.disabled = false;
   }
+});
+
+resendButton?.addEventListener("click", () => {
+  if (resendRemaining > 0) return;
+  clearResendCountdown();
+  challengeId = "";
+  const codeInput = document.querySelector("#code");
+  if (codeInput) codeInput.value = "";
+  setStatus("#code-status", "");
+  setStatus("#email-status", "Complete the security check to send a fresh code.");
+  resetTurnstileWidget("Complete the security check to resend.");
+  codeStep?.classList.add("hidden");
+  emailStep?.classList.remove("hidden");
+  document.querySelector("#email")?.focus();
 });
 
 document.querySelector("#restart")?.addEventListener("click", () => location.reload());

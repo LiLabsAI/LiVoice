@@ -1,1 +1,44 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LiVoice service status</title><link rel="icon" href="/media/logo.svg" type="image/svg+xml"><link rel="stylesheet" href="/styles.css"><script src="/status.js" defer></script></head><body><main><div class="brand"><span class="mark" aria-hidden="true"></span>LiVoice</div><section class="card"><h2>Service status</h2><p class="lead" id="service-status">Checking LiVoice…</p><p class="note">This check confirms that the account and transcription API is reachable. It does not expose account data.</p></section><footer><a href="/">Home</a> · <a href="/privacy">Privacy</a></footer></main></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>LiVoice service status</title>
+    <link rel="icon" href="/media/logo.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/status.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <div class="brand"><span class="mark" aria-hidden="true"></span>LiVoice</div>
+      <section class="card">
+        <div class="status-head">
+          <h1>Service status</h1>
+          <span class="status-badge" id="status-badge">Checking</span>
+        </div>
+        <p class="lead" id="service-status" aria-live="polite">Checking LiVoice…</p>
+        <p class="status error hidden" id="maintenance-message" role="status"></p>
+        <dl class="component-list" aria-label="Service components">
+          <div class="component-row">
+            <dt>Database</dt>
+            <dd id="component-database">Checking…</dd>
+          </div>
+          <div class="component-row">
+            <dt>Transcription</dt>
+            <dd id="component-transcription">Checking…</dd>
+          </div>
+          <div class="component-row">
+            <dt>Daily budget</dt>
+            <dd id="component-quota">Checking…</dd>
+          </div>
+        </dl>
+        <div class="status-meta">
+          <p class="note" id="status-checked">Last checked: —</p>
+          <button class="secondary" id="status-refresh" type="button">Refresh</button>
+        </div>
+        <p class="note">This check probes live database, transcription availability, and daily budget health. It never exposes account data.</p>
+      </section>
+      <footer><a href="/">Home</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></footer>
+    </main>
+  </body>
+</html>

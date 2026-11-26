@@ -49,10 +49,12 @@ export function classifyContext(input: { appId: string; hint?: string; field?: "
 
   if (purpose === "unknown") {
     if (["com.google.android.gm", "com.microsoft.office.outlook", "com.microsoft.outlook", "com.apple.mail", "org.mozilla.thunderbird"].includes(app)) purpose = "email";
-    else if (["com.whatsapp", "net.whatsapp.whatsapp", "com.whatsapp.w4b", "com.facebook.orca", "com.tencent.mm", "com.tencent.xinwechat", "com.apple.ichat", "org.telegram.messenger", "ru.keepcoder.telegram", "ph.telegra.telegraph", "org.thoughtcrime.securesms", "org.whispersystems.signal-desktop", "com.discord"].includes(app)) purpose = "chat";
+    else if (["com.whatsapp", "net.whatsapp.whatsapp", "com.whatsapp.w4b", "com.facebook.orca", "com.tencent.mm", "com.tencent.xinwechat", "com.apple.ichat", "org.telegram.messenger", "ru.keepcoder.telegram", "ph.telegra.telegraph", "org.thoughtcrime.securesms", "org.whispersystems.signal-desktop", "com.discord", "com.google.android.apps.messaging", "com.samsung.android.messaging"].includes(app)) purpose = "chat";
     else if (["com.slack", "com.tinyspeck.slackmacgap", "com.microsoft.teams", "com.microsoft.teams2"].includes(app)) purpose = "work_chat";
-    else if (["com.apple.notes", "com.miui.notes", "com.google.android.keep", "com.microsoft.office.onenote", "notion.id"].includes(app)) purpose = "notes";
+    else if (["com.apple.notes", "com.miui.notes", "com.google.android.keep", "com.microsoft.office.onenote", "notion.id", "md.obsidian"].includes(app)) purpose = "notes";
     else if (["com.apple.terminal", "com.googlecode.iterm2", "com.microsoft.vscode", "com.sublimetext.4"].includes(app)) purpose = "code";
+    else if (["com.linkedin.android", "com.twitter.android"].includes(app) && !/\b(message|chat|reply)\b/u.test(hint)) purpose = "post";
+    else if (app === "com.android.chrome" && !/\b(message|chat|reply)\b/u.test(hint)) purpose = "search";
     if (purpose !== "unknown") source = "app";
   }
   if (purpose === "unknown" && /\b(message|chat|reply)\b/u.test(hint)) { purpose = "chat"; source = "field"; }

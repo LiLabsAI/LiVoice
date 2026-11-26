@@ -8,10 +8,17 @@ import com.aliahad.wovoice.account.SecretNames
 import com.aliahad.wovoice.account.SecretsVault
 import com.aliahad.wovoice.account.SyncAccount
 import com.aliahad.wovoice.data.AnalyticsPeriod
+import com.aliahad.wovoice.data.DeletionHold
+import com.aliahad.wovoice.data.SYNC_LOCAL
+import com.aliahad.wovoice.data.SYNC_QUEUED
+import com.aliahad.wovoice.data.WoVoiceDao
 import com.aliahad.wovoice.data.WoVoiceDatabase
 import com.aliahad.wovoice.data.WoVoiceRepository
 import com.aliahad.wovoice.network.TranscriptionClient
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
@@ -207,6 +214,217 @@ class SyncCoordinatorTest {
         assertEquals(2, mac.repository.history().size)
     }
 
+    @Test
+    fun cancelledPushAndCrashOrphanedQueuedRowsRecoverToLocal() = runBlocking {
+        // 1) Pre-existing SYNC_QUEUED row from a previous crash recovers on syncLocked() entry.
+        val crashed = device()
+        crashed.dictate("req-crash", "Recovered after crash.")
+        crashed.dao.updateHistorySync(ACCOUNT, "req-crash", SYNC_QUEUED, 0)
+        val recovered = crashed.sync.syncNow() as SyncResult.Success
+        assertEquals(2, recovered.uploaded)
+        assertTrue("history:req-crash" in cloud.records)
+
+        // 2) Cancelling coroutine mid-push restores staged rows back to SYNC_LOCAL via NonCancellable finally.
+        val pushEntered = CompletableDeferred<Unit>()
+        val releasePush = CompletableDeferred<Unit>()
+        val stallingApi = object : CloudSyncApi by cloud {
+            override fun push(token: String, writes: List<CloudWrite>): AccountResult<List<AppliedSyncItem>> {
+                pushEntered.complete(Unit)
+                runBlocking { releasePush.await() }
+                return cloud.push(token, writes)
+            }
+        }
+        val phone = device(apiOverride = stallingApi)
+        phone.dictate("req-cancel", "Must not stay queued.")
+        val job = launch(Dispatchers.Default) { phone.sync.syncNow() }
+        pushEntered.await()
+        job.cancel()
+        releasePush.complete(Unit)
+        job.join()
+
+        val row = phone.dao.historyBySyncId(ACCOUNT, "req-cancel")!!
+        assertEquals(SYNC_LOCAL, row.syncState)
+    }
+
+    @Test
+    fun pullGuardsAgainstStalledCursorAndPageCap() = runBlocking {
+        val stalledApi = object : CloudSyncApi by cloud {
+            override fun pull(token: String, cursor: Long): AccountResult<CloudPage> =
+                AccountResult.Success(CloudPage(nextCursor = cursor, hasMore = true, records = emptyList(), settings = null))
+        }
+        val stalledDevice = device(apiOverride = stalledApi)
+        val stalledResult = stalledDevice.sync.syncNow()
+        assertTrue(stalledResult is SyncResult.Error)
+        assertTrue((stalledResult as SyncResult.Error).message.contains("did not advance"))
+
+        var pulls = 0
+        val infiniteApi = object : CloudSyncApi by cloud {
+            override fun pull(token: String, cursor: Long): AccountResult<CloudPage> {
+                pulls++
+                return AccountResult.Success(CloudPage(nextCursor = cursor + 1, hasMore = true, records = emptyList(), settings = null))
+            }
+        }
+        val cappedDevice = device(apiOverride = infiniteApi)
+        val cappedResult = cappedDevice.sync.syncNow()
+        assertTrue(cappedResult is SyncResult.Error)
+        assertEquals(SyncCoordinator.MAX_PULL_PAGES, pulls)
+    }
+
+    @Test
+    fun legacyVaultAcceptsKeyVersionGreaterThanOneAndPreservesKeysOnFailedUnwrap() = runBlocking {
+        val vaultKey = VaultCrypto.newSecret()
+        val recovery = VaultCrypto.newSecret()
+        val wrongRecovery = VaultCrypto.newSecret()
+        val sealedV2 = VaultCrypto.encryptRecord(
+            vaultKey,
+            JSONObject()
+                .put("schemaVersion", 1)
+                .put("text", "Encrypted with rotated key v2.")
+                .put("createdAtMs", 1_790_000_000_000)
+                .put("zoneId", "UTC")
+                .put("offsetSeconds", 0)
+                .put("wordCount", 5)
+                .put("audioDurationMs", 2_000)
+                .toString().toByteArray(),
+            ACCOUNT,
+            "history",
+            "vault-v2",
+            keyVersion = 2,
+            schemaVersion = 1,
+        )
+        val legacy = FakeLegacy(
+            vault = VaultCrypto.wrapVaultKey(vaultKey, recovery, ACCOUNT, keyVersion = 2),
+            records = listOf(LegacyRecord("vault-v2", "history", keyVersion = 2, sealedV2.nonce, sealedV2.ciphertext, deleted = false)),
+        )
+
+        // Wrong recovery secret: must fail WITHOUT wiping secrets or marking migrated.
+        val broken = device(legacy)
+        broken.secrets.putString(SecretNames.VAULT_KEY, VaultCrypto.encodeSecret(vaultKey))
+        broken.secrets.putString(SecretNames.RECOVERY_SECRET, VaultCrypto.encodeSecret(wrongRecovery))
+        val failed = broken.sync.syncNow()
+        assertTrue(failed is SyncResult.Error)
+        assertTrue(broken.secrets.contains(SecretNames.VAULT_KEY))
+        assertTrue(broken.secrets.contains(SecretNames.RECOVERY_SECRET))
+        assertFalse(broken.settings.isCloudSyncMigrated(ACCOUNT))
+
+        // Correct recovery secret: keyVersion = 2 record imports and retires the vault.
+        val healthy = device(legacy)
+        healthy.secrets.putString(SecretNames.VAULT_KEY, VaultCrypto.encodeSecret(vaultKey))
+        healthy.secrets.putString(SecretNames.RECOVERY_SECRET, VaultCrypto.encodeSecret(recovery))
+        assertTrue(healthy.sync.syncNow() is SyncResult.Success)
+        assertEquals(listOf("Encrypted with rotated key v2."), healthy.repository.history().map { it.finalText })
+        assertTrue(healthy.settings.isCloudSyncMigrated(ACCOUNT))
+    }
+
+    @Test
+    fun syncPropagatesAccountRestrictionStatus() = runBlocking {
+        val restrictedApi = object : CloudSyncApi by cloud {
+            override fun pull(token: String, cursor: Long): AccountResult<CloudPage> =
+                AccountResult.Error("ACCOUNT_SUSPENDED", "Suspended for abuse.", false, 403)
+        }
+        val fakeAccount = FakeAccount()
+        val phone = device(apiOverride = restrictedApi, accountOverride = fakeAccount)
+        val result = phone.sync.syncNow()
+        assertTrue(result is SyncResult.Error)
+        assertEquals("ACCOUNT_SUSPENDED", fakeAccount.restrictedCode)
+        assertFalse(fakeAccount.cloudServicesAllowed)
+    }
+
+    @Test
+    fun cachedRetentionAppliesAfterPullEvenWhenPageSettingsNull() = runBlocking {
+        val now = 2_000_000_000_000L
+        val oldPayload = JSONObject()
+            .put("schemaVersion", 1)
+            .put("text", "Old pulled dictation")
+            .put("createdAtMs", now - 40 * 86_400_000L)
+            .put("zoneId", "UTC")
+            .put("offsetSeconds", 0)
+            .put("wordCount", 3)
+            .put("audioDurationMs", 1_000)
+        val recentPayload = JSONObject()
+            .put("schemaVersion", 1)
+            .put("text", "Recent pulled dictation")
+            .put("createdAtMs", now - 2 * 86_400_000L)
+            .put("zoneId", "UTC")
+            .put("offsetSeconds", 0)
+            .put("wordCount", 3)
+            .put("audioDurationMs", 1_000)
+
+        val nullSettingsApi = object : CloudSyncApi by cloud {
+            override fun pull(token: String, cursor: Long): AccountResult<CloudPage> =
+                AccountResult.Success(
+                    CloudPage(
+                        nextCursor = 2L,
+                        hasMore = false,
+                        records = listOf(
+                            CloudRecord("old-1", "history", 1, false, oldPayload),
+                            CloudRecord("new-1", "history", 1, false, recentPayload),
+                        ),
+                        settings = null,
+                    ),
+                )
+        }
+        val phone = device(apiOverride = nullSettingsApi, clock = { now })
+        phone.settings.historyRetentionDays = 30
+        phone.sync.syncNow()
+        assertEquals(listOf("Recent pulled dictation"), phone.repository.history().map { it.finalText })
+    }
+
+    @Test
+    fun skipNewTermsDoesNotStarveEditsToAlreadySyncedTerms() = runBlocking {
+        val phone = device()
+        // Sync 1 existing term first so its syncVersion == 1.
+        assertTrue(phone.repository.addManualTerm("ExistingTerm"))
+        assertTrue(phone.sync.syncNow() is SyncResult.Success)
+        val existingEntry = phone.repository.dictionary(confirmed = true).single { it.term == "ExistingTerm" }
+        assertEquals(1, existingEntry.syncVersion)
+
+        // Now cap cloud dictionary at 1, add 105 brand-new local terms (more than MAX_BATCH=100),
+        // AND rename the existing synced term. Even with 105 unsynced new terms ahead of it,
+        // the edit to the synced term must NOT be starved!
+        cloud.dictionaryLimit = 1
+        repeat(105) { idx -> assertTrue(phone.repository.addManualTerm("NewTerm$idx")) }
+        assertTrue(phone.repository.renameTerm(existingEntry, "ExistingTermRenamed"))
+
+        val result = phone.sync.syncNow() as SyncResult.Success
+        assertEquals("Your dictionary is full.", result.warning)
+        val remote = cloud.records["dictionary:${existingEntry.syncId}"]!!
+        assertEquals("ExistingTermRenamed", remote.payload!!.getString("term"))
+        assertEquals(2, remote.version)
+    }
+
+    @Test
+    fun undoDeletionHoldDefersTombstoneUploadUntilReleasedOrExpired() = runBlocking {
+        var now = 1_000_000L
+        val hold = DeletionHold()
+        val phone = device(clock = { now }, deletionHold = hold)
+        phone.dictate("req-hold", "Undoable dictation.")
+        phone.sync.syncNow()
+        assertTrue("history:req-hold" in cloud.records)
+
+        val stored = phone.repository.history().single()
+        phone.repository.deleteHistory(stored, holdWindowMs = 8_000L)
+
+        // Sync during the Undo window must NOT upload the tombstone.
+        phone.sync.syncNow()
+        assertFalse(cloud.records["history:req-hold"]!!.deleted)
+
+        // After the hold expires, syncing uploads the tombstone.
+        now += 9_000L
+        phone.sync.syncNow()
+        assertTrue(cloud.records["history:req-hold"]!!.deleted)
+    }
+
+    @Test
+    fun hittingMaxPushRoundsReportsRemainingWorkWarning() = runBlocking {
+        val phone = device(maxPushRounds = 1)
+        // 105 local dictations (> 1 batch of 100) with maxPushRounds = 1 leaves work pending.
+        repeat(105) { idx -> phone.dictate("req-$idx", "Item $idx") }
+        val result = phone.sync.syncNow() as SyncResult.Success
+        assertEquals(100, result.uploaded)
+        assertTrue(result.warning?.contains("waiting to sync") == true)
+    }
+
     // ---- Harness ----
 
     private inner class Device(
@@ -214,6 +432,7 @@ class SyncCoordinatorTest {
         val sync: SyncCoordinator,
         val settings: FakeSettings,
         val secrets: MemorySecrets,
+        val dao: WoVoiceDao,
     ) {
         suspend fun dictate(
             requestId: String,
@@ -230,12 +449,19 @@ class SyncCoordinatorTest {
             )
             if (createdAtMs != null) {
                 val stored = repository.history().first { it.requestId == requestId }
-                databases.last().dao().updateRecord(stored.copy(createdAtMs = createdAtMs))
+                dao.updateRecord(stored.copy(createdAtMs = createdAtMs))
             }
         }
     }
 
-    private fun device(legacy: LegacyVaultApi = FakeLegacy(null, emptyList())): Device {
+    private fun device(
+        legacy: LegacyVaultApi = FakeLegacy(null, emptyList()),
+        apiOverride: CloudSyncApi = cloud,
+        accountOverride: FakeAccount = FakeAccount(),
+        clock: () -> Long = System::currentTimeMillis,
+        deletionHold: DeletionHold = DeletionHold(),
+        maxPushRounds: Int = 20,
+    ): Device {
         val database = Room.inMemoryDatabaseBuilder<WoVoiceDatabase>()
             .setDriver(BundledSQLiteDriver())
             .setQueryCoroutineContext(Dispatchers.IO)
@@ -243,8 +469,19 @@ class SyncCoordinatorTest {
         databases += database
         val settings = FakeSettings()
         val secrets = MemorySecrets()
-        val sync = SyncCoordinator(FakeAccount(), cloud, legacy, secrets, settings, database.dao())
-        return Device(WoVoiceRepository(database.dao(), settings), sync, settings, secrets)
+        val sync = SyncCoordinator(
+            account = accountOverride,
+            api = apiOverride,
+            legacy = legacy,
+            secrets = secrets,
+            settings = settings,
+            dao = database.dao(),
+            clock = clock,
+            ioDispatcher = Dispatchers.IO,
+            deletionHold = deletionHold,
+            maxPushRounds = maxPushRounds,
+        )
+        return Device(WoVoiceRepository(database.dao(), settings, clock = clock, deletionHold = deletionHold), sync, settings, secrets, database.dao())
     }
 
     private class FakeCloud : CloudSyncApi {
@@ -341,10 +578,16 @@ class SyncCoordinatorTest {
 
     private class FakeAccount : SyncAccount {
         override val accountId: String = ACCOUNT
-        override val cloudServicesAllowed: Boolean = true
-        override val restrictionMessage: String = "Restricted."
+        override var cloudServicesAllowed: Boolean = true
+        override var restrictionMessage: String = "Restricted."
+        var restrictedCode: String? = null
         override suspend fun validAccessToken(): AccountResult<String> = AccountResult.Success("token")
         override suspend fun refreshAfterRejected(rejectedToken: String): AccountResult<String> = AccountResult.Success("token")
+        override fun markRestricted(code: String, message: String, suspendedUntilMs: Long?) {
+            restrictedCode = code
+            cloudServicesAllowed = false
+            restrictionMessage = message
+        }
     }
 
     private class MemorySecrets : SecretsVault {

@@ -9,7 +9,6 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Build
 import android.os.SystemClock
-import android.provider.Settings
 import android.text.TextPaint
 import android.text.TextUtils
 import android.util.TypedValue
@@ -26,8 +25,12 @@ import android.widget.TextView
 import android.widget.Toast
 import com.aliahad.wovoice.ui.dp
 import com.aliahad.wovoice.ui.rounded
+import com.aliahad.wovoice.ui.setButtonAccessibilityRole
+import com.aliahad.wovoice.ui.systemAnimationsEnabled
+import com.aliahad.wovoice.voice.WavRecorder
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.exp
 import kotlin.math.log10
 import kotlin.math.sin
@@ -52,7 +55,7 @@ internal class DictationBubbleView(
     private var hapticsEnabled = true
     private var animationsEnabled = true
     private var waveformEnabled = true
-    private var motionAllowed = systemAnimationsEnabled()
+    private var motionAllowed = context.systemAnimationsEnabled()
     private var transition: ValueAnimator? = null
     private var exiting = false
     private var downX = 0f
@@ -77,13 +80,14 @@ internal class DictationBubbleView(
         elevation = context.dp(6).toFloat()
         setPadding(context.dp(4), context.dp(4), context.dp(4), context.dp(4))
         background = rounded(SURFACE, context.dp(28).toFloat(), BORDER, context.dp(1))
-        addView(control, LayoutParams(context.dp(48), context.dp(48)))
+        val initialHeight = control.desiredHeight(presentation)
+        addView(control, LayoutParams(context.dp(48), initialHeight))
         control.isClickable = true
         control.isFocusable = true
         control.setOnClickListener {
             if (exiting || presentation.mode == Mode.PROCESSING) return@setOnClickListener
             haptic(HapticFeedbackConstants.KEYBOARD_TAP)
-            if (presentation.mode == Mode.MESSAGE) messageAction?.invoke() else onTap()
+            if (presentation.mode == Mode.MESSAGE) (messageAction ?: onTap).invoke() else onTap()
         }
         control.setOnLongClickListener {
             haptic(HapticFeedbackConstants.LONG_PRESS)
@@ -96,6 +100,7 @@ internal class DictationBubbleView(
             setTextColor(Color.rgb(195, 191, 207))
             gravity = Gravity.CENTER
             isFocusable = true
+            setButtonAccessibilityRole()
             setOnClickListener {
                 if (!exiting) {
                     haptic(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -103,7 +108,7 @@ internal class DictationBubbleView(
                 }
             }
         }
-        addView(close, LayoutParams(context.dp(44), context.dp(48)))
+        addView(close, LayoutParams(context.dp(48), initialHeight))
         control.setOnTouchListener { view, event ->
             if (exiting) return@setOnTouchListener true
             when (event.actionMasked) {
@@ -157,7 +162,7 @@ internal class DictationBubbleView(
         hapticsEnabled = haptics
         animationsEnabled = animations
         waveformEnabled = waveform
-        val allowed = animations && systemAnimationsEnabled()
+        val allowed = animations && context.systemAnimationsEnabled()
         if (motionAllowed != allowed) {
             motionAllowed = allowed
             if (!allowed) {
@@ -169,6 +174,7 @@ internal class DictationBubbleView(
                 control.animate().cancel()
                 control.scaleX = 1f; control.scaleY = 1f; control.alpha = 1f
                 control.layoutParams.width = control.desiredWidth(presentation)
+                updateVerticalSizing(presentation)
                 control.requestLayout()
                 control.setDisplay(presentation, presentation, 1f)
             }
@@ -197,7 +203,7 @@ internal class DictationBubbleView(
     fun animateIn() {
         if (exiting) return
         animate().cancel()
-        if (!animationsEnabled || !systemAnimationsEnabled()) {
+        if (!animationsEnabled || !context.systemAnimationsEnabled()) {
             alpha = 1f; scaleX = 1f; scaleY = 1f
             return
         }
@@ -214,22 +220,34 @@ internal class DictationBubbleView(
         transition?.cancel(); transition = null
         control.stopMotion()
         animate().cancel()
-        if (!isAttachedToWindow || !animationsEnabled || !systemAnimationsEnabled()) { onFinished(); return }
+        if (!isAttachedToWindow || !animationsEnabled || !context.systemAnimationsEnabled()) { onFinished(); return }
         animate().alpha(0f).scaleX(.97f).scaleY(.97f).setDuration(120L)
             .setInterpolator(motionInterpolator).withEndAction(onFinished).start()
     }
 
+    private fun updateVerticalSizing(value: Display) {
+        val targetHeight = control.desiredHeight(value)
+        if (control.layoutParams.height != targetHeight) {
+            control.layoutParams.height = targetHeight
+            close.layoutParams.height = targetHeight
+            background = rounded(SURFACE, (targetHeight / 2f + context.dp(4)), BORDER, context.dp(1))
+            control.requestLayout()
+            close.requestLayout()
+        }
+    }
+
     private fun show(next: Display) {
         if (exiting) return
-        motionAllowed = animationsEnabled && systemAnimationsEnabled()
+        motionAllowed = animationsEnabled && context.systemAnimationsEnabled()
         control.updateMotion(motionAllowed, waveformEnabled)
         control.contentDescription = when (next.mode) {
             Mode.IDLE -> "Start bubble dictation"
             Mode.RECORDING -> "Finish bubble recording"
             Mode.PROCESSING -> "Transcribing speech"
-            Mode.MESSAGE -> listOfNotNull(next.message, next.actionLabel).joinToString(". ")
+            Mode.MESSAGE -> listOfNotNull(next.message, next.actionLabel ?: "Tap to dismiss").joinToString(". ")
         }
         close.contentDescription = if (next.mode == Mode.IDLE) "Hide dictation bubble" else "Cancel bubble dictation"
+        updateVerticalSizing(next)
         if (next == presentation) { control.invalidate(); return }
         val previous = presentation
         presentation = next
@@ -271,10 +289,6 @@ internal class DictationBubbleView(
 
     private fun haptic(kind: Int) { if (hapticsEnabled) control.performHapticFeedback(kind) }
 
-    private fun systemAnimationsEnabled(): Boolean = runCatching {
-        Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f
-    }.getOrDefault(true)
-
     override fun onDetachedFromWindow() {
         removeCallbacks(longPress)
         transition?.cancel(); transition = null
@@ -297,7 +311,7 @@ internal class DictationBubbleView(
             color = Color.WHITE
         }
         private val smallTextPaint = TextPaint(textPaint).apply {
-            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 10f, resources.displayMetrics)
+            textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, resources.displayMetrics)
         }
         private val bounds = RectF()
         private val targets = FloatArray(5) { .1f }
@@ -329,12 +343,38 @@ internal class DictationBubbleView(
             }
         }
 
-        fun desiredWidth(value: Display): Int = when (value.mode) {
-            Mode.IDLE -> context.dp(48)
-            Mode.RECORDING -> maxOf(context.dp(96), (context.dp(52) + textPaint.measureText("0:00")).toInt())
-            Mode.PROCESSING -> maxOf(context.dp(116), (context.dp(48) + textPaint.measureText("Thinking…")).toInt())
-            Mode.MESSAGE -> maxOf(context.dp(128), (textPaint.measureText(value.message) + context.dp(24)).toInt())
-                .coerceAtMost(context.dp(180))
+        fun desiredHeight(value: Display): Int {
+            val primaryHeight = textPaint.fontMetrics.let { it.descent - it.ascent }
+            val secondaryHeight = smallTextPaint.fontMetrics.let { it.descent - it.ascent }
+            val twoLineNeeded = value.mode == Mode.RECORDING ||
+                (value.mode == Mode.MESSAGE && value.actionLabel != null)
+            val textBlock = if (twoLineNeeded) {
+                primaryHeight + secondaryHeight + context.dp(14)
+            } else {
+                primaryHeight + context.dp(16)
+            }
+            return maxOf(context.dp(48), ceil(textBlock).toInt())
+        }
+
+        fun desiredWidth(value: Display): Int {
+            val maxMessageWidth = minOf(
+                context.dp(248),
+                (resources.displayMetrics.widthPixels * 0.72f).toInt() - context.dp(60),
+            ).coerceAtLeast(context.dp(160))
+            return when (value.mode) {
+                Mode.IDLE -> context.dp(48)
+                Mode.RECORDING -> maxOf(
+                    context.dp(104),
+                    (context.dp(56) + maxOf(textPaint.measureText("0:00"), smallTextPaint.measureText("/ 1:00"))).toInt(),
+                )
+                Mode.PROCESSING -> maxOf(context.dp(120), (context.dp(48) + textPaint.measureText("Thinking…")).toInt())
+                Mode.MESSAGE -> {
+                    val primary = textPaint.measureText(value.message)
+                    val secondary = value.actionLabel?.let { smallTextPaint.measureText(it) } ?: 0f
+                    maxOf(context.dp(136), (maxOf(primary, secondary) + context.dp(24)).toInt())
+                        .coerceAtMost(maxMessageWidth)
+                }
+            }
         }
 
         fun setDisplay(from: Display, to: Display, fraction: Float) {
@@ -355,7 +395,7 @@ internal class DictationBubbleView(
         }
 
         fun setElapsed(durationMs: Long) {
-            val seconds = durationMs.coerceIn(0, 60_000) / 1000
+            val seconds = durationMs.coerceIn(0, WavRecorder.MAX_DURATION_MS) / 1000
             if (seconds == elapsedSeconds) return
             elapsedSeconds = seconds
             elapsedText = String.format(Locale.ROOT, "%d:%02d", seconds / 60, seconds % 60)
@@ -391,11 +431,27 @@ internal class DictationBubbleView(
             drawDisplay(canvas, current, progress)
         }
 
+        private fun drawTwoLines(canvas: Canvas, x: Float, primary: String, secondary: String, align: Paint.Align) {
+            textPaint.textAlign = align
+            smallTextPaint.textAlign = align
+            val pMetrics = textPaint.fontMetrics
+            val sMetrics = smallTextPaint.fontMetrics
+            val pHeight = pMetrics.descent - pMetrics.ascent
+            val sHeight = sMetrics.descent - sMetrics.ascent
+            val gap = context.dp(2).toFloat()
+            val totalHeight = pHeight + gap + sHeight
+            val top = (height - totalHeight) / 2f
+            val firstBaseline = top - pMetrics.ascent
+            val secondBaseline = top + pHeight + gap - sMetrics.ascent
+            canvas.drawText(primary, x, firstBaseline, textPaint)
+            canvas.drawText(secondary, x, secondBaseline, smallTextPaint)
+        }
+
         private fun drawDisplay(canvas: Canvas, value: Display, opacity: Float) {
             if (opacity <= 0f) return
             val alpha = (opacity * 255).toInt().coerceIn(0, 255)
             paint.color = ACCENT; paint.alpha = alpha
-            textPaint.alpha = alpha; smallTextPaint.alpha = (alpha * .7f).toInt()
+            textPaint.alpha = alpha; smallTextPaint.alpha = (alpha * .78f).toInt()
             val centerY = height / 2f
             when (value.mode) {
                 Mode.IDLE -> drawMicrophone(canvas, width / 2f, centerY)
@@ -407,10 +463,7 @@ internal class DictationBubbleView(
                         bounds.set(centerX - context.dp(7), centerY - context.dp(7), centerX + context.dp(7), centerY + context.dp(7))
                         canvas.drawRoundRect(bounds, context.dp(2).toFloat(), context.dp(2).toFloat(), paint)
                     }
-                    textPaint.textAlign = Paint.Align.LEFT
-                    canvas.drawText(elapsedText, context.dp(46).toFloat(), centerY - context.dp(1), textPaint)
-                    smallTextPaint.textAlign = Paint.Align.LEFT
-                    canvas.drawText("/ 1:00", context.dp(46).toFloat(), centerY + context.dp(13), smallTextPaint)
+                    drawTwoLines(canvas, context.dp(46).toFloat(), elapsedText, "/ 1:00", Paint.Align.LEFT)
                 }
                 Mode.PROCESSING -> {
                     paint.style = Paint.Style.FILL
@@ -423,15 +476,14 @@ internal class DictationBubbleView(
                     canvas.drawText("Thinking…", context.dp(36).toFloat(), centerY - (textPaint.ascent() + textPaint.descent()) / 2f, textPaint)
                 }
                 Mode.MESSAGE -> {
-                    textPaint.textAlign = Paint.Align.CENTER
-                    smallTextPaint.textAlign = Paint.Align.CENTER
                     val available = (width - context.dp(16)).coerceAtLeast(1).toFloat()
                     val message = TextUtils.ellipsize(value.message, textPaint, available, TextUtils.TruncateAt.END).toString()
-                    if (value.actionLabel == null) canvas.drawText(message, width / 2f, centerY - (textPaint.ascent() + textPaint.descent()) / 2f, textPaint)
-                    else {
+                    if (value.actionLabel == null) {
+                        textPaint.textAlign = Paint.Align.CENTER
+                        canvas.drawText(message, width / 2f, centerY - (textPaint.ascent() + textPaint.descent()) / 2f, textPaint)
+                    } else {
                         val action = TextUtils.ellipsize(value.actionLabel, smallTextPaint, available, TextUtils.TruncateAt.END).toString()
-                        canvas.drawText(message, width / 2f, centerY - context.dp(2), textPaint)
-                        canvas.drawText(action, width / 2f, centerY + context.dp(13), smallTextPaint)
+                        drawTwoLines(canvas, width / 2f, message, action, Paint.Align.CENTER)
                     }
                 }
             }

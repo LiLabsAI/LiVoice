@@ -289,7 +289,7 @@ struct SettingsView: View {
                 Link("Privacy policy", destination: URL(string: "https://wovoice.aliahad.com/privacy")!)
                 Link("Terms of use", destination: URL(string: "https://wovoice.aliahad.com/terms")!)
                 Link("Service status", destination: URL(string: "https://wovoice.aliahad.com/status")!)
-                LabeledContent("Version", value: "1.0.0 (1)")
+                LabeledContent("Version", value: appVersion)
             }
         }.navigationTitle("Settings")
             .sheet(item: $export) { item in
@@ -304,6 +304,12 @@ struct SettingsView: View {
             .confirmationDialog("Sign out of LiVoice?", isPresented: $signingOut, titleVisibility: .visible) { Button("Sign out", role: .destructive) { Task { await model.logout() } } } message: { Text("Voice input and sync will stop. Your local history and vocabulary remain on this device.") }
             .confirmationDialog("Reset analytics on all synced devices?", isPresented: $resetAnalytics, titleVisibility: .visible) { Button("Reset analytics", role: .destructive) { model.clear(.analytics) } }
             .confirmationDialog("Clear all local data and sign out?", isPresented: $clearLocal, titleVisibility: .visible) { Button("Clear local data", role: .destructive) { Task { await model.clearLocalData() } } } message: { Text("Removes this device’s history, vocabulary, analytics, settings, and secure sign-in. Your cloud data remains.") }
+    }
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+        let build = info?["CFBundleVersion"] as? String ?? "1"
+        return "\(short) (\(build))"
     }
     private var historyExport: String { model.history.compactMap { $0.payload?["text"]?.string }.joined(separator: "\n\n") }
 }

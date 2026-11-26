@@ -19,6 +19,8 @@ const RECORD_TYPES = new Set<RecordType>(["history", "dictionary", "analytics"])
 const MAX_BATCH_ITEMS = 100;
 const MAX_PAGE_ITEMS = 100;
 const MAX_PAYLOAD_CHARS = 32_768;
+const MAX_METADATA_PAYLOAD_CHARS = 4_096;
+const TOMBSTONE_CHUNK_SIZE = 40;
 const RETENTION_CHOICES = new Set([30, 90, 365]);
 const DATA_KEY_VERSION = 1;
 const V1_PURGE_GRACE_MS = 30 * 86_400_000;
@@ -149,7 +151,7 @@ function invalidSettings(): never {
 }
 
 async function pull(env: AppEnv, requestId: string, principal: Principal, url: URL): Promise<Response> {
-  const cursor = Math.max(0, Number.parseInt(url.searchParams.get("cursor") ?? "0", 10) || 0);
+  const cursor = parseCursorParam(url.searchParams.get("cursor"));
   const limit = Math.min(
     MAX_PAGE_ITEMS,
     Math.max(1, Number.parseInt(url.searchParams.get("limit") ?? "50", 10) || 50),
@@ -161,11 +163,13 @@ async function pull(env: AppEnv, requestId: string, principal: Principal, url: U
      JOIN sync_records r ON r.user_id = c.user_id AND r.item_type = c.item_type AND r.item_id = c.item_id
      WHERE c.user_id = ? AND c.seq > ?
      ORDER BY c.seq ASC LIMIT ?`,
-  ).bind(principal.userId, cursor, limit).all<RecordRow & { seq: number }>();
-  const needsKey = rows.results.some((row) => row.deleted === 0);
+  ).bind(principal.userId, cursor, limit + 1).all<RecordRow & { seq: number }>();
+  const hasMore = rows.results.length > limit;
+  const pageRows = rows.results.slice(0, limit);
+  const needsKey = pageRows.some((row) => row.deleted === 0);
   const dataKey = needsKey ? await accountDataKey(env, principal.userId, false) : null;
-  const items = await Promise.all(rows.results.map((row) => publicRecord(principal.userId, row, dataKey)));
-  const nextCursor = rows.results.reduce((latest, row) => Math.max(latest, row.seq), cursor);
+  const items = await Promise.all(pageRows.map((row) => publicRecord(principal.userId, row, dataKey)));
+  const nextCursor = pageRows.reduce((latest, row) => Math.max(latest, row.seq), cursor);
   await recordActivity(env, {
     userId: principal.userId,
     type: "sync_pulled",
@@ -176,9 +180,9 @@ async function pull(env: AppEnv, requestId: string, principal: Principal, url: U
   return noStoreJson({
     requestId,
     nextCursor,
-    hasMore: rows.results.length === limit,
+    hasMore,
     items,
-    settings: cursor === 0 || rows.results.length < limit
+    settings: cursor === 0 || !hasMore
       ? await readSettings(env, principal.userId)
       : undefined,
   });
@@ -233,34 +237,100 @@ async function push(request: Request, env: AppEnv, requestId: string, principal:
     const sealed = item.deleted || !dataKey
       ? null
       : await sealBytes(dataKey, new TextEncoder().encode(JSON.stringify(item.payload)), recordAad(principal.userId, item));
-    statements.push(
-      env.DB.prepare(
-        `INSERT INTO sync_records
-          (user_id, item_type, item_id, version, key_version, nonce, ciphertext, deleted, created_at, modified_at)
-         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(user_id, item_type, item_id) DO UPDATE SET
-           version = excluded.version, key_version = excluded.key_version, nonce = excluded.nonce,
-           ciphertext = excluded.ciphertext, deleted = excluded.deleted,
-           created_at = CASE WHEN excluded.deleted = 1 THEN sync_records.created_at ELSE excluded.created_at END,
-           modified_at = excluded.modified_at`,
-      ).bind(
-        principal.userId,
-        item.type,
-        item.id,
-        version,
-        sealed ? DATA_KEY_VERSION : null,
-        sealed?.nonce ?? null,
-        sealed?.ciphertext ?? null,
-        item.deleted ? 1 : 0,
-        item.createdAt,
-        now,
-      ),
-      changeStatement(env, principal.userId, item.type, item.id, now),
-    );
+    if (item.type === "history" && !item.deleted) {
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO sync_records
+            (user_id, item_type, item_id, version, key_version, nonce, ciphertext, deleted, created_at, modified_at)
+           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+           WHERE EXISTS (SELECT 1 FROM users WHERE id = ? AND history_sync_enabled = 1)
+           ON CONFLICT(user_id, item_type, item_id) DO UPDATE SET
+             version = excluded.version, key_version = excluded.key_version, nonce = excluded.nonce,
+             ciphertext = excluded.ciphertext, deleted = excluded.deleted,
+             created_at = CASE WHEN excluded.deleted = 1 THEN sync_records.created_at ELSE excluded.created_at END,
+             modified_at = excluded.modified_at`,
+        ).bind(
+          principal.userId,
+          item.type,
+          item.id,
+          version,
+          sealed ? DATA_KEY_VERSION : null,
+          sealed?.nonce ?? null,
+          sealed?.ciphertext ?? null,
+          0,
+          item.createdAt,
+          now,
+          principal.userId,
+        ),
+        guardedChangeStatement(env, principal.userId, item.type, item.id, version, now),
+      );
+    } else if (item.type === "dictionary" && !item.deleted) {
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO sync_records
+            (user_id, item_type, item_id, version, key_version, nonce, ciphertext, deleted, created_at, modified_at)
+           SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+           WHERE EXISTS (
+             SELECT 1 FROM sync_records
+             WHERE user_id = ? AND item_type = 'dictionary' AND item_id = ? AND deleted = 0
+           ) OR (
+             SELECT COUNT(*) FROM sync_records
+             WHERE user_id = ? AND item_type = 'dictionary' AND deleted = 0
+           ) < ?
+           ON CONFLICT(user_id, item_type, item_id) DO UPDATE SET
+             version = excluded.version, key_version = excluded.key_version, nonce = excluded.nonce,
+             ciphertext = excluded.ciphertext, deleted = excluded.deleted,
+             created_at = CASE WHEN excluded.deleted = 1 THEN sync_records.created_at ELSE excluded.created_at END,
+             modified_at = excluded.modified_at`,
+        ).bind(
+          principal.userId,
+          item.type,
+          item.id,
+          version,
+          sealed ? DATA_KEY_VERSION : null,
+          sealed?.nonce ?? null,
+          sealed?.ciphertext ?? null,
+          0,
+          item.createdAt,
+          now,
+          principal.userId,
+          item.id,
+          principal.userId,
+          RECORD_LIMITS.dictionary,
+        ),
+        guardedChangeStatement(env, principal.userId, item.type, item.id, version, now),
+      );
+    } else {
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO sync_records
+            (user_id, item_type, item_id, version, key_version, nonce, ciphertext, deleted, created_at, modified_at)
+           VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(user_id, item_type, item_id) DO UPDATE SET
+             version = excluded.version, key_version = excluded.key_version, nonce = excluded.nonce,
+             ciphertext = excluded.ciphertext, deleted = excluded.deleted,
+             created_at = CASE WHEN excluded.deleted = 1 THEN sync_records.created_at ELSE excluded.created_at END,
+             modified_at = excluded.modified_at`,
+        ).bind(
+          principal.userId,
+          item.type,
+          item.id,
+          version,
+          sealed ? DATA_KEY_VERSION : null,
+          sealed?.nonce ?? null,
+          sealed?.ciphertext ?? null,
+          item.deleted ? 1 : 0,
+          item.createdAt,
+          now,
+        ),
+        changeStatement(env, principal.userId, item.type, item.id, now),
+      );
+    }
     applied.push({ id: item.id, type: item.type, version });
   }
+  let batchResults: D1Result[];
   try {
-    await env.DB.batch(statements);
+    batchResults = await env.DB.batch(statements);
   } catch (error) {
     if (!(error instanceof Error) || !error.message.includes("SYNC_CONFLICT")) throw error;
     // Another device won a race after the version check above.
@@ -271,8 +341,30 @@ async function push(request: Request, env: AppEnv, requestId: string, principal:
     const key = rows.some((row) => row.deleted === 0) ? await accountDataKey(env, principal.userId, false) : null;
     return conflictResponse(env, requestId, principal, await Promise.all(rows.map((row) => publicRecord(principal.userId, row, key))));
   }
+  for (let index = 0; index < writes.length; index += 1) {
+    const item = writes[index]!;
+    if ((batchResults[index * 2]?.meta.changes ?? 0) === 1) continue;
+    if (item.type === "history" && !item.deleted) {
+      throw new ApiError(409, "HISTORY_SYNC_DISABLED", false, "History sync is turned off for this account.");
+    }
+    if (item.type === "dictionary" && !item.deleted) {
+      throw new ApiError(413, "STORAGE_LIMIT_REACHED", false, "Your dictionary has reached its 1,000-term limit.");
+    }
+  }
   for (const type of ["history", "analytics"] as const) {
-    if (writes.some((item) => item.type === type && !item.deleted)) await pruneOldest(env, principal.userId, type);
+    if (writes.some((item) => item.type === type && !item.deleted)) {
+      try {
+        await pruneOldest(env, principal.userId, type);
+      } catch (error) {
+        console.error(JSON.stringify({
+          event: "sync_prune_failed",
+          requestId,
+          userId: principal.userId,
+          type,
+          reason: safeFailure(error),
+        }));
+      }
+    }
   }
   await recordActivity(env, {
     userId: principal.userId,
@@ -314,6 +406,24 @@ function changeStatement(env: AppEnv, userId: string, type: string, id: string, 
   ).bind(userId, type, id, now);
 }
 
+function guardedChangeStatement(
+  env: AppEnv,
+  userId: string,
+  type: string,
+  id: string,
+  version: number,
+  now: number,
+): D1PreparedStatement {
+  return env.DB.prepare(
+    `INSERT OR REPLACE INTO sync_record_changes(user_id, item_type, item_id, created_at)
+     SELECT ?, ?, ?, ?
+     WHERE EXISTS (
+       SELECT 1 FROM sync_records
+       WHERE user_id = ? AND item_type = ? AND item_id = ? AND version = ?
+     )`,
+  ).bind(userId, type, id, now, userId, type, id, version);
+}
+
 /** Deletes (with tombstones, so devices follow) the oldest records beyond the type's ceiling. */
 async function pruneOldest(env: AppEnv, userId: string, type: "history" | "analytics"): Promise<void> {
   const stored = await env.DB.prepare(
@@ -328,17 +438,32 @@ async function pruneOldest(env: AppEnv, userId: string, type: "history" | "analy
   await tombstone(env, userId, type, oldest.results.map((row) => row.item_id));
 }
 
-async function tombstone(env: AppEnv, userId: string, type: RecordType, ids: string[]): Promise<void> {
-  if (!ids.length) return;
-  const now = Date.now();
-  await env.DB.batch(ids.flatMap((id) => [
-    env.DB.prepare(
-      `UPDATE sync_records SET version = version + 1, deleted = 1, nonce = NULL, ciphertext = NULL,
-         key_version = NULL, modified_at = ?
-       WHERE user_id = ? AND item_type = ? AND item_id = ? AND deleted = 0`,
-    ).bind(now, userId, type, id),
-    changeStatement(env, userId, type, id, now),
-  ]));
+async function tombstone(env: AppEnv, userId: string, type: RecordType, ids: string[]): Promise<number> {
+  if (!ids.length) return 0;
+  let updatedCount = 0;
+  for (let offset = 0; offset < ids.length; offset += TOMBSTONE_CHUNK_SIZE) {
+    const chunk = ids.slice(offset, offset + TOMBSTONE_CHUNK_SIZE);
+    const now = Date.now();
+    const results = await env.DB.batch(chunk.flatMap((id) => [
+      env.DB.prepare(
+        `UPDATE sync_records SET version = version + 1, deleted = 1, nonce = NULL, ciphertext = NULL,
+           key_version = NULL, modified_at = ?
+         WHERE user_id = ? AND item_type = ? AND item_id = ? AND deleted = 0`,
+      ).bind(now, userId, type, id),
+      env.DB.prepare(
+        `INSERT OR REPLACE INTO sync_record_changes(user_id, item_type, item_id, created_at)
+         SELECT ?, ?, ?, ?
+         WHERE EXISTS (
+           SELECT 1 FROM sync_records
+           WHERE user_id = ? AND item_type = ? AND item_id = ? AND deleted = 1 AND modified_at = ?
+         )`,
+      ).bind(userId, type, id, now, userId, type, id, now),
+    ]));
+    for (let index = 0; index < chunk.length; index += 1) {
+      if ((results[index * 2]?.meta.changes ?? 0) === 1) updatedCount += 1;
+    }
+  }
+  return updatedCount;
 }
 
 /** Scheduled: deletes history older than each account's chosen retention, everywhere. */
@@ -352,8 +477,9 @@ export async function applyHistoryRetention(env: AppEnv, limit = 500): Promise<n
   ).bind(now, limit).all<{ user_id: string; item_id: string }>();
   const byUser = new Map<string, string[]>();
   for (const row of expired.results) byUser.set(row.user_id, [...(byUser.get(row.user_id) ?? []), row.item_id]);
-  for (const [userId, ids] of byUser) await tombstone(env, userId, "history", ids);
-  return expired.results.length;
+  let tombstoned = 0;
+  for (const [userId, ids] of byUser) tombstoned += await tombstone(env, userId, "history", ids);
+  return tombstoned;
 }
 
 /**
@@ -456,7 +582,17 @@ function recordAad(userId: string, item: { type: string; id: string }): string {
 
 async function publicRecord(userId: string, row: RecordRow, dataKey: CryptoKey | null): Promise<object> {
   let payload: unknown = null;
-  if (row.deleted === 0 && row.nonce && row.ciphertext && dataKey) {
+  if (row.deleted === 0) {
+    if (!row.nonce || !row.ciphertext || !dataKey) {
+      console.error(JSON.stringify({
+        event: "sync_record_unreadable",
+        userId,
+        itemType: row.item_type,
+        itemId: row.item_id,
+        reason: "missing_ciphertext_or_key",
+      }));
+      throw new ApiError(500, "INFERENCE_FAILED", true, "A synced record could not be decrypted. Please try again.");
+    }
     try {
       const plaintext = await openBytes(dataKey, row.nonce, row.ciphertext, recordAad(userId, {
         type: row.item_type,
@@ -464,7 +600,14 @@ async function publicRecord(userId: string, row: RecordRow, dataKey: CryptoKey |
       }));
       payload = JSON.parse(new TextDecoder().decode(plaintext));
     } catch (error) {
-      console.error(JSON.stringify({ event: "sync_record_unreadable", reason: safeFailure(error) }));
+      console.error(JSON.stringify({
+        event: "sync_record_unreadable",
+        userId,
+        itemType: row.item_type,
+        itemId: row.item_id,
+        reason: safeFailure(error),
+      }));
+      throw new ApiError(500, "INFERENCE_FAILED", true, "A synced record could not be decrypted. Please try again.");
     }
   }
   return {
@@ -492,7 +635,8 @@ function validateWrite(value: unknown): RecordWrite {
   const payload = item.payload;
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) invalidRecord();
   const record = payload as Record<string, unknown>;
-  if (JSON.stringify(record).length > MAX_PAYLOAD_CHARS) {
+  const maxChars = type === "history" ? MAX_PAYLOAD_CHARS : MAX_METADATA_PAYLOAD_CHARS;
+  if (JSON.stringify(record).length > maxChars) {
     throw new ApiError(413, "PAYLOAD_TOO_LARGE", false, "A sync record is too large.");
   }
   const createdAt = finiteTime(record.createdAtMs);
@@ -507,6 +651,18 @@ function validateWrite(value: unknown): RecordWrite {
     invalidRecord();
   }
   return { id, type, baseVersion, deleted, payload: record, createdAt: createdAt ?? Date.now() };
+}
+
+function parseCursorParam(raw: string | null): number {
+  if (raw === null || raw === "") return 0;
+  if (!/^\d+$/u.test(raw)) {
+    throw new ApiError(400, "INVALID_REQUEST", false, "The sync cursor is invalid.");
+  }
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new ApiError(400, "INVALID_REQUEST", false, "The sync cursor is invalid.");
+  }
+  return parsed;
 }
 
 function finiteTime(value: unknown): number | null {

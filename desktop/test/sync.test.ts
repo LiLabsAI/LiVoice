@@ -19,7 +19,11 @@ class FakeCloud {
   records = new Map<string, CloudRecord>()
   private feed = new Map<string, number>()
   private seq = 0
-  settings: CloudSettings = { historySyncEnabled: true, historyRetentionDays: null, legacyVault: false }
+  settings: CloudSettings = {
+    historySyncEnabled: true,
+    historyRetentionDays: null,
+    legacyVault: false
+  }
   dictionaryLimit = 1_000
   dropNextPushResponse = false
   afterPushApplied: (() => void) | null = null
@@ -124,7 +128,8 @@ class FakeCloud {
       this.legacyMigrated = true
     },
     getVault: async () => {
-      if (this.legacyMigrated) throw new WorkerError('UPGRADE_REQUIRED', 'Update LiVoice.', false, 426)
+      if (this.legacyMigrated)
+        throw new WorkerError('UPGRADE_REQUIRED', 'Update LiVoice.', false, 426)
       return this.legacyVault
     },
     pullLegacy: async (_token: string, cursor: number): Promise<LegacyPage> => ({
@@ -176,7 +181,11 @@ function device(cloud: FakeCloud): Device {
   return { db, sync, state, secrets }
 }
 
-function record(requestId: string, text = 'Hello from the Mac.', createdAtMs = Date.now()): DictationRecord {
+function record(
+  requestId: string,
+  text = 'Hello from the Mac.',
+  createdAtMs = Date.now()
+): DictationRecord {
   return {
     requestId,
     finalText: text,
@@ -351,7 +360,11 @@ describe('cloud sync', () => {
     const sealed = encryptRecord(
       vaultKey,
       Buffer.from(
-        JSON.stringify({ schemaVersion: 1, text: 'Only in the vault.', createdAtMs: 1_790_000_000_000 })
+        JSON.stringify({
+          schemaVersion: 1,
+          text: 'Only in the vault.',
+          createdAtMs: 1_790_000_000_000
+        })
       ),
       ACCOUNT,
       'history',
@@ -374,5 +387,187 @@ describe('cloud sync', () => {
     // A second device without the key simply joins.
     const other = device(cloud)
     assert.deepEqual(await other.sync.syncNow(), { kind: 'ok', uploaded: 0, downloaded: 2 })
+  })
+
+  test('analytics events sync across devices, preserve Home stats across retention, and migrate from legacy vault', async () => {
+    const oldMs = Date.now() - 40 * 86_400_000
+    mac.db.insertRecord(record('r-old', 'Old text.', oldMs))
+    mac.db.insertAnalyticsEvent({
+      syncId: 'r-old',
+      createdAtMs: oldMs,
+      zoneId: 'UTC',
+      audioDurationMs: 5_000,
+      wordCount: 12,
+      processingMs: 400,
+      polished: true,
+      corrected: false,
+      asrNeurons: 2.1,
+      polishNeurons: 0.4,
+      estimatedCostUsd: 0.0002
+    })
+    assert.deepEqual(await mac.sync.syncNow(), { kind: 'ok', uploaded: 2, downloaded: 0 })
+    assert.ok(cloud.records.has('analytics:r-old'))
+
+    // Retention removes old history row, while analytics stats survive on both devices.
+    await mac.sync.updateSettings({ historyRetentionDays: 30 })
+    assert.equal(mac.db.historySearch('').length, 0)
+    assert.equal(mac.db.stats(0).words, 12)
+
+    const other = device(cloud)
+    assert.equal((await other.sync.syncNow()).kind, 'ok')
+    assert.equal(other.db.stats(0).dictations, 1)
+    assert.equal(other.db.stats(0).words, 12)
+
+    // Legacy v1 vault analytics record is preserved during migration
+    const legacyCloud = new FakeCloud()
+    const vaultKey = newSecret()
+    const recovery = newSecret()
+    legacyCloud.legacyVault = wrapVaultKey(vaultKey, recovery, ACCOUNT, 1)
+    const sealedAnalytics = encryptRecord(
+      vaultKey,
+      Buffer.from(
+        JSON.stringify({
+          schemaVersion: 1,
+          createdAtMs: 1_790_000_000_000,
+          zoneId: 'UTC',
+          audioDurationMs: 3_000,
+          wordCount: 9,
+          processingMs: 250,
+          polished: true,
+          corrected: false,
+          asrNeurons: 1,
+          polishNeurons: 0.1,
+          estimatedCostUsd: 0.0001
+        })
+      ),
+      ACCOUNT,
+      'analytics',
+      'vault-an-1',
+      1,
+      1
+    )
+    legacyCloud.legacyItems = [
+      {
+        id: 'vault-an-1',
+        type: 'analytics',
+        version: 1,
+        keyVersion: 1,
+        deleted: false,
+        ...sealedAnalytics
+      }
+    ]
+    const migrator = device(legacyCloud)
+    migrator.secrets.values.set('vault-key.bin', vaultKey)
+    migrator.secrets.values.set('recovery-secret.bin', recovery)
+    assert.equal((await migrator.sync.syncNow()).kind, 'ok')
+    assert.ok(legacyCloud.records.has('analytics:vault-an-1'))
+    assert.equal(migrator.db.stats(0).words, 9)
+  })
+
+  test('in-flight dictionary edit during upload is preserved and uploaded instead of overwritten', async () => {
+    mac.db.addTerm('K8s')
+    const [entry] = mac.db.listTerms('')
+    cloud.afterPushApplied = () => {
+      assert.equal(mac.db.editTerm(entry.id, 'Kubernetes'), true)
+    }
+    const outcome = await mac.sync.syncNow()
+    // Round 0 uploaded 'K8s' (v1), revision check preserved the in-flight edit as
+    // 'local', and round 1 immediately uploaded 'Kubernetes' (v2) in the same sync!
+    assert.deepEqual(outcome, { kind: 'ok', uploaded: 2, downloaded: 0 })
+    assert.equal(mac.db.dictionaryNeedingSync().length, 0)
+    const cloudEntries = [...cloud.records.values()].filter((r) => r.type === 'dictionary')
+    assert.equal(cloudEntries.length, 1)
+    assert.equal(cloudEntries[0].version, 2)
+    assert.equal(cloudEntries[0].payload?.term, 'Kubernetes')
+  })
+
+  test('recovers queued rows on start and aborts cleanly if signed out mid-pull', async () => {
+    mac.db.insertRecord(record('stuck-1'))
+    const [pending] = mac.db.historyNeedingSync()
+    mac.db.markQueued([{ type: 'history', id: pending.requestId, revision: pending.localRevision }])
+    assert.equal(mac.db.historyNeedingSync().length, 0)
+
+    assert.deepEqual(await mac.sync.syncNow(), { kind: 'ok', uploaded: 1, downloaded: 0 })
+    assert.ok(cloud.records.has('history:stuck-1'))
+
+    // Sign-out mid-pull must not write downloaded records or advance cursor
+    let account: string | null = ACCOUNT
+    const db2 = openDatabase(':memory:')
+    let cursor = 0
+    const pullWorker = {
+      ...cloud.worker,
+      pullRecords: async (token: string, c: number) => {
+        const res = await cloud.worker.pullRecords(token, c)
+        account = null // simulate sign-out while network call was in flight
+        return res
+      }
+    }
+    const sync2 = new SyncService({
+      worker: pullWorker as never,
+      settings: {
+        workerUrl: 'https://wovoice.test',
+        getAccountId: () => account,
+        getCursor: () => cursor,
+        setCursor: (v) => void (cursor = v),
+        getMigratedAccount: () => ACCOUNT,
+        setMigratedAccount: () => undefined,
+        getHistorySyncEnabled: () => true,
+        setHistorySyncEnabled: () => undefined,
+        getRetentionDays: () => null,
+        setRetentionDays: () => undefined,
+        setLastSyncAt: () => undefined
+      },
+      db: db2,
+      getToken: async () => 'token',
+      vaultDir: '/unused',
+      secrets: mac.secrets
+    })
+    const outcome = await sync2.syncNow()
+    assert.equal(outcome.kind, 'error')
+    assert.equal(cursor, 0)
+    assert.equal(db2.historySearch('').length, 0)
+  })
+
+  test('guards against non-monotonic pull cursors and reports ACCOUNT_SUSPENDED', async () => {
+    let calls = 0
+    const badCursorWorker = {
+      ...cloud.worker,
+      pullRecords: async () => {
+        calls++
+        return { nextCursor: 0, hasMore: true, items: [], settings: cloud.settings }
+      }
+    }
+    let restricted: string | null = null
+    const db3 = openDatabase(':memory:')
+    const sync3 = new SyncService({
+      worker: badCursorWorker as never,
+      settings: mac.state,
+      db: db3,
+      getToken: async () => 'token',
+      onAccountRestricted: (state) => void (restricted = state),
+      vaultDir: '/unused',
+      secrets: mac.secrets
+    })
+    const outcome = await sync3.syncNow()
+    assert.equal(outcome.kind, 'ok')
+    assert.equal(calls, 1)
+
+    const suspendedWorker = {
+      ...cloud.worker,
+      pullRecords: async () => {
+        throw new WorkerError('ACCOUNT_SUSPENDED', 'Suspended for review', false, 403)
+      }
+    }
+    const sync4 = new SyncService({
+      worker: suspendedWorker as never,
+      settings: mac.state,
+      db: db3,
+      getToken: async () => 'token',
+      onAccountRestricted: (state) => void (restricted = state),
+      vaultDir: '/unused',
+      secrets: mac.secrets
+    })
+    assert.equal((await sync4.syncNow()).kind, 'error')
+    assert.equal(restricted, 'suspended')
   })
 })

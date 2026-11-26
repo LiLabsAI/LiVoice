@@ -1,10 +1,14 @@
 package com.aliahad.wovoice.account
 
+import kotlinx.coroutines.CancellationException
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.BufferedInputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
+import java.net.URLEncoder
 
 data class AccountUser(
     val id: String,
@@ -85,8 +89,18 @@ sealed interface AccountResult<out T> {
     ) : AccountResult<Nothing>
 }
 
-class AccountClient(private val baseUrlProvider: () -> String) {
-    fun exchangeAuthorizationCode(code: String, verifier: String, deviceName: String): AccountResult<SessionTokens> =
+interface AccountApi {
+    fun exchangeAuthorizationCode(code: String, verifier: String, deviceName: String): AccountResult<SessionTokens>
+    fun refresh(refreshToken: String): AccountResult<SessionTokens>
+    fun profile(accessToken: String): AccountResult<AccountProfile>
+    fun sessions(accessToken: String): AccountResult<List<DeviceSession>>
+    fun revokeSession(accessToken: String, sessionId: String): AccountResult<Unit>
+    fun logout(accessToken: String): AccountResult<Unit>
+    fun deleteAccount(accessToken: String, reauthToken: String, codeVerifier: String): AccountResult<Unit>
+}
+
+class AccountClient(private val baseUrlProvider: () -> String) : AccountApi {
+    override fun exchangeAuthorizationCode(code: String, verifier: String, deviceName: String): AccountResult<SessionTokens> =
         post(
             "/v1/auth/token",
             JSONObject()
@@ -96,12 +110,12 @@ class AccountClient(private val baseUrlProvider: () -> String) {
                 .put("deviceName", deviceName),
         ) { parseTokens(it) }
 
-    fun refresh(refreshToken: String): AccountResult<SessionTokens> = post(
+    override fun refresh(refreshToken: String): AccountResult<SessionTokens> = post(
         "/v1/auth/refresh",
         JSONObject().put("refreshToken", refreshToken),
     ) { parseTokens(it) }
 
-    fun profile(accessToken: String): AccountResult<AccountProfile> = request(
+    override fun profile(accessToken: String): AccountResult<AccountProfile> = request(
         path = "/v1/me",
         method = "GET",
         accessToken = accessToken,
@@ -112,7 +126,7 @@ class AccountClient(private val baseUrlProvider: () -> String) {
         )
     }
 
-    fun sessions(accessToken: String): AccountResult<List<DeviceSession>> = request(
+    override fun sessions(accessToken: String): AccountResult<List<DeviceSession>> = request(
         path = "/v1/me/sessions",
         method = "GET",
         accessToken = accessToken,
@@ -124,7 +138,7 @@ class AccountClient(private val baseUrlProvider: () -> String) {
                 add(
                     DeviceSession(
                         id = value.getString("id"),
-                        deviceName = value.optString("deviceName", "Android device"),
+                        deviceName = value.optString("deviceName").takeIf(String::isNotBlank) ?: "LiVoice device",
                         createdAtMs = value.optLong("createdAt"),
                         lastSeenAtMs = value.optLong("lastSeenAt"),
                         current = value.optInt("current") == 1 || value.optBoolean("current"),
@@ -134,14 +148,14 @@ class AccountClient(private val baseUrlProvider: () -> String) {
         }
     }
 
-    fun revokeSession(accessToken: String, sessionId: String): AccountResult<Unit> = request(
-        path = "/v1/me/sessions/${URI(null, null, sessionId, null).rawPath}",
+    override fun revokeSession(accessToken: String, sessionId: String): AccountResult<Unit> = request(
+        path = "/v1/me/sessions/${encodePathSegment(sessionId)}",
         method = "DELETE",
         accessToken = accessToken,
         acceptsEmpty = true,
     ) { Unit }
 
-    fun logout(accessToken: String): AccountResult<Unit> = request(
+    override fun logout(accessToken: String): AccountResult<Unit> = request(
         path = "/v1/auth/logout",
         method = "POST",
         accessToken = accessToken,
@@ -149,11 +163,13 @@ class AccountClient(private val baseUrlProvider: () -> String) {
         acceptsEmpty = true,
     ) { Unit }
 
-    fun deleteAccount(accessToken: String, reauthToken: String): AccountResult<Unit> = request(
+    override fun deleteAccount(accessToken: String, reauthToken: String, codeVerifier: String): AccountResult<Unit> = request(
         path = "/v1/me",
         method = "DELETE",
         accessToken = accessToken,
-        body = JSONObject().put("reauthToken", reauthToken),
+        body = JSONObject()
+            .put("reauthToken", reauthToken)
+            .put("codeVerifier", codeVerifier),
         acceptsEmpty = true,
     ) { Unit }
 
@@ -175,6 +191,7 @@ class AccountClient(private val baseUrlProvider: () -> String) {
             0,
         )
         var connection: HttpURLConnection? = null
+        var responseStatus = 0
         return try {
             connection = endpoint.openConnection() as HttpURLConnection
             connection.requestMethod = method
@@ -189,17 +206,41 @@ class AccountClient(private val baseUrlProvider: () -> String) {
                 connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             }
             val status = connection.responseCode
+            responseStatus = status
             val response = readResponse(connection, status)
             if (status in 200..299) {
                 if (acceptsEmpty && response.isBlank()) AccountResult.Success(parser(JSONObject()))
                 else AccountResult.Success(parser(JSONObject(response)))
             } else parseError(response, status)
-        } catch (_: Exception) {
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: ResponseTooLargeException) {
+            AccountResult.Error(
+                "INVALID_RESPONSE",
+                "LiVoice returned an unexpectedly large response.",
+                false,
+                responseStatus,
+            )
+        } catch (_: JSONException) {
+            AccountResult.Error(
+                "INVALID_RESPONSE",
+                "LiVoice returned an unreadable response.",
+                false,
+                responseStatus,
+            )
+        } catch (_: IOException) {
             AccountResult.Error(
                 "NETWORK_UNAVAILABLE",
                 "Could not reach LiVoice. Check your connection and try again.",
                 true,
                 0,
+            )
+        } catch (_: Exception) {
+            AccountResult.Error(
+                "INTERNAL_ERROR",
+                "LiVoice could not complete the request.",
+                false,
+                responseStatus,
             )
         } finally {
             connection?.disconnect()
@@ -260,9 +301,12 @@ class AccountClient(private val baseUrlProvider: () -> String) {
         return BufferedInputStream(stream).reader(Charsets.UTF_8).use { reader ->
             val output = StringBuilder()
             val buffer = CharArray(4_096)
-            while (output.length < MAX_RESPONSE_CHARS) {
-                val count = reader.read(buffer, 0, minOf(buffer.size, MAX_RESPONSE_CHARS - output.length))
+            while (true) {
+                val count = reader.read(buffer, 0, buffer.size)
                 if (count < 0) break
+                if (output.length + count > MAX_RESPONSE_CHARS) {
+                    throw ResponseTooLargeException("Response exceeds $MAX_RESPONSE_CHARS characters")
+                }
                 output.append(buffer, 0, count)
             }
             output.toString()
@@ -275,8 +319,13 @@ class AccountClient(private val baseUrlProvider: () -> String) {
         URI("${base.toASCIIString()}$path").toURL()
     }.getOrNull()
 
-    private companion object {
+    private class ResponseTooLargeException(message: String) : IOException(message)
+
+    internal companion object {
         const val MAX_RESPONSE_CHARS = 256_000
+
+        fun encodePathSegment(segment: String): String =
+            URLEncoder.encode(segment, Charsets.UTF_8.name()).replace("+", "%20")
     }
 }
 

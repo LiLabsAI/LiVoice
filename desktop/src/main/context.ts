@@ -11,9 +11,13 @@ import {
 } from '../../../worker/src/context'
 export { restrictContext }
 export type { ContextLevel, ContextStyle, DictationContext }
+
+export type ContextFailureReason = 'accessibility' | 'editor' | 'secure'
+
 interface EditorSnapshot {
-  reason?: 'accessibility' | 'editor'
+  reason?: ContextFailureReason
   available: boolean
+  fallback?: boolean
   token?: string
   appId?: string
   hint?: string
@@ -22,12 +26,15 @@ interface EditorSnapshot {
   before?: string
   after?: string
 }
+
 export interface ContextTarget {
-  reason?: 'accessibility' | 'editor'
+  reason?: ContextFailureReason
   token?: string
+  fallback?: boolean
   sentenceStart: boolean
   context?: DictationContext
 }
+
 /** A bounded private IPC channel; raw snippets never reach logs or persistent storage. */
 export class ContextReader {
   private child: ChildProcessWithoutNullStreams | null = null
@@ -36,6 +43,7 @@ export class ContextReader {
     number,
     { resolve: (value: Record<string, unknown>) => void; timer: ReturnType<typeof setTimeout> }
   >()
+
   prepare(): void {
     if (this.child) return
     const path = app.isPackaged
@@ -45,12 +53,17 @@ export class ContextReader {
     this.child = child
     createInterface({ input: child.stdout }).on('line', (line) => {
       try {
-        const value = JSON.parse(line)
+        const value = JSON.parse(line) as { id?: unknown; result?: unknown }
+        if (typeof value?.id !== 'number') return
         const pending = this.pending.get(value.id)
         if (!pending) return
         this.pending.delete(value.id)
         clearTimeout(pending.timer)
-        pending.resolve(value.result)
+        const result =
+          value.result !== null && typeof value.result === 'object' && !Array.isArray(value.result)
+            ? (value.result as Record<string, unknown>)
+            : {}
+        pending.resolve(result)
       } catch {
         /* Ignore malformed output; the request deadline closes the helper. */
       }
@@ -63,6 +76,7 @@ export class ContextReader {
       if (this.child === child) this.dispose()
     })
   }
+
   private request(
     command: string,
     extra: Record<string, unknown> = {}
@@ -72,17 +86,26 @@ export class ContextReader {
       const id = ++this.sequence
       const timer = setTimeout(() => this.dispose(), 2500)
       this.pending.set(id, { resolve, timer })
-      this.child?.stdin.write(JSON.stringify({ id, command, ...extra }) + '\n', (error) => {
+      if (!this.child) {
+        clearTimeout(timer)
+        this.pending.delete(id)
+        resolve({})
+        return
+      }
+      this.child.stdin.write(JSON.stringify({ id, command, ...extra }) + '\n', (error) => {
         if (error) this.dispose()
       })
     })
   }
+
   async capture(level: ContextLevel, style: ContextStyle): Promise<ContextTarget> {
     const value = (await this.request('capture', { level })) as unknown as EditorSnapshot
-    if (!value.available || typeof value.token !== 'string')
+    if (!value.available || typeof value.token !== 'string') {
       return { sentenceStart: true, reason: value.reason }
+    }
     return {
       token: value.token,
+      fallback: value.fallback === true,
       sentenceStart: value.sentenceStart !== false,
       context: classifyContext({
         appId: value.appId ?? '',
@@ -95,12 +118,20 @@ export class ContextReader {
       })
     }
   }
+
   async validate(token?: string): Promise<boolean> {
     return !!token && (await this.request('validate', { token })).valid === true
   }
+
+  /** Posts a native Cmd+V keystroke via CGEventPost (no osascript / System Events needed). */
+  async paste(): Promise<boolean> {
+    return (await this.request('paste')).ok === true
+  }
+
   release(): void {
     if (this.child) void this.request('release')
   }
+
   dispose(): void {
     const child = this.child
     this.child = null

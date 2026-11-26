@@ -1,21 +1,30 @@
 package com.aliahad.wovoice.account
 
 import com.aliahad.wovoice.account.SecretNames.PENDING_AUTH_INTENT
+import com.aliahad.wovoice.account.SecretNames.PENDING_PKCE_CREATED_AT
 import com.aliahad.wovoice.account.SecretNames.PENDING_PKCE_STATE
 import com.aliahad.wovoice.account.SecretNames.PENDING_PKCE_VERIFIER
+import com.aliahad.wovoice.account.SecretNames.RECOVERY_SECRET
 import com.aliahad.wovoice.account.SecretNames.REFRESH_TOKEN
+import com.aliahad.wovoice.account.SecretNames.VAULT_KEY
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicLong
 
-class SessionManager private constructor(
+class SessionManager internal constructor(
     private val secrets: SecretsVault,
     private val settings: AccountSettings,
-    baseUrlProvider: () -> String,
-    deviceNameProvider: () -> String,
+    private val client: AccountApi,
+    private val deviceName: () -> String,
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : SyncAccount {
-    private val client = AccountClient(baseUrlProvider)
     private val refreshMutex = Mutex()
-    private val deviceName = deviceNameProvider
+    private val sessionStateLock = Any()
+    private val sessionGeneration = AtomicLong(0L)
 
     @Volatile private var accessToken: String? = null
     @Volatile private var accessExpiresAtMs: Long = 0
@@ -33,23 +42,10 @@ class SessionManager private constructor(
     override val restrictionMessage: String get() = accountStatus.publicMessage
         ?: "This account cannot use cloud sync right now. Contact ${accountStatus.supportEmail} for help."
 
-    fun markRestricted(code: String, message: String, suspendedUntilMs: Long? = null) {
-        val state = when (code) {
-            "ACCOUNT_SUSPENDED" -> AccountState.SUSPENDED
-            "ACCOUNT_BANNED" -> AccountState.BANNED
-            else -> return
+    override fun markRestricted(code: String, message: String, suspendedUntilMs: Long?) {
+        synchronized(sessionStateLock) {
+            markRestrictedLocked(code, message, suspendedUntilMs)
         }
-        val current = user ?: storedUser() ?: return
-        installUser(
-            current.copy(
-                accountStatus = AccountStatus(
-                    state = state,
-                    suspendedUntilMs = if (state == AccountState.SUSPENDED) suspendedUntilMs else null,
-                    publicMessage = message.trim().takeIf(String::isNotBlank),
-                    supportEmail = current.accountStatus.supportEmail,
-                ),
-            ),
-        )
     }
 
     fun prepareLogin(intent: String = AUTH_LOGIN): PkceRequest = Pkce.create().also { request ->
@@ -57,9 +53,14 @@ class SessionManager private constructor(
         secrets.putString(PENDING_PKCE_VERIFIER, request.verifier)
         secrets.putString(PENDING_PKCE_STATE, request.state)
         secrets.putString(PENDING_AUTH_INTENT, intent)
+        secrets.putString(PENDING_PKCE_CREATED_AT, clock().toString())
     }
 
     fun pendingLoginMatches(state: String): Boolean {
+        if (isPendingLoginExpired()) {
+            clearPendingLogin()
+            return false
+        }
         val expected = secrets.getString(PENDING_PKCE_STATE) ?: return false
         if (expected.length != state.length) return false
         var difference = 0
@@ -77,9 +78,13 @@ class SessionManager private constructor(
         if (verifier.isNullOrBlank()) {
             return AccountResult.Error("AUTH_REQUIRED", "The sign-in request expired. Please start again.", false, 401)
         }
-        return when (val result = client.exchangeAuthorizationCode(code, verifier, deviceName())) {
+        return when (val result = withContext(ioDispatcher) { client.exchangeAuthorizationCode(code, verifier, deviceName()) }) {
             is AccountResult.Success -> {
-                install(result.value)
+                synchronized(sessionStateLock) {
+                    sessionGeneration.incrementAndGet()
+                    quota = null
+                    installLocked(result.value)
+                }
                 AccountResult.Success(result.value.user)
             }
             is AccountResult.Error -> result
@@ -91,12 +96,13 @@ class SessionManager private constructor(
             clearPendingLogin()
             return AccountResult.Error("AUTH_REQUIRED", "The deletion verification could not be verified.", false, 401)
         }
+        val verifier = secrets.getString(PENDING_PKCE_VERIFIER)
         clearPendingLogin()
-        val access = when (val result = validAccessToken()) {
-            is AccountResult.Success -> result.value
-            is AccountResult.Error -> return result
+        if (verifier.isNullOrBlank()) {
+            return AccountResult.Error("AUTH_REQUIRED", "The deletion verification expired. Please start again.", false, 401)
         }
-        return when (val result = client.deleteAccount(access, reauthToken)) {
+        val generation = sessionGeneration.get()
+        return when (val result = callWithRefresh(generation) { access -> client.deleteAccount(access, reauthToken, verifier) }) {
             is AccountResult.Success -> {
                 clearLocalSession()
                 result
@@ -107,12 +113,12 @@ class SessionManager private constructor(
 
     override suspend fun validAccessToken(): AccountResult<String> {
         val current = accessToken
-        if (!current.isNullOrBlank() && System.currentTimeMillis() < accessExpiresAtMs - EXPIRY_SKEW_MS) {
+        if (!current.isNullOrBlank() && clock() < accessExpiresAtMs - EXPIRY_SKEW_MS) {
             return AccountResult.Success(current)
         }
         return refreshMutex.withLock {
             val checked = accessToken
-            if (!checked.isNullOrBlank() && System.currentTimeMillis() < accessExpiresAtMs - EXPIRY_SKEW_MS) {
+            if (!checked.isNullOrBlank() && clock() < accessExpiresAtMs - EXPIRY_SKEW_MS) {
                 return@withLock AccountResult.Success(checked)
             }
             refreshLocked()
@@ -121,53 +127,33 @@ class SessionManager private constructor(
 
     override suspend fun refreshAfterRejected(rejectedToken: String): AccountResult<String> = refreshMutex.withLock {
         val current = accessToken
-        if (!current.isNullOrBlank() && current != rejectedToken && System.currentTimeMillis() < accessExpiresAtMs) {
+        if (!current.isNullOrBlank() && current != rejectedToken && clock() < accessExpiresAtMs) {
             AccountResult.Success(current)
         } else refreshLocked()
     }
 
     suspend fun loadProfile(): AccountResult<AccountProfile> {
-        val token = when (val auth = validAccessToken()) {
-            is AccountResult.Success -> auth.value
-            is AccountResult.Error -> return auth
-        }
-        return when (val result = client.profile(token)) {
+        val generation = sessionGeneration.get()
+        return when (val result = callWithRefresh(generation) { token -> client.profile(token) }) {
             is AccountResult.Success -> {
-                installUser(result.value.user)
-                quota = result.value.quota
+                synchronized(sessionStateLock) {
+                    if (sessionGeneration.get() != generation) {
+                        return AccountResult.Error("AUTH_REQUIRED", "Your session ended.", false, 401)
+                    }
+                    installUserLocked(result.value.user)
+                    quota = result.value.quota
+                }
                 result
             }
-            is AccountResult.Error -> {
-                if (result.code == "TOKEN_EXPIRED") {
-                    when (val refreshed = refreshAfterRejected(token)) {
-                        is AccountResult.Success -> client.profile(refreshed.value).also { second ->
-                            if (second is AccountResult.Success) {
-                                installUser(second.value.user)
-                                quota = second.value.quota
-                            }
-                        }
-                        is AccountResult.Error -> refreshed
-                    }
-                } else result
-            }
+            is AccountResult.Error -> result
         }
     }
 
-    suspend fun listSessions(): AccountResult<List<DeviceSession>> {
-        val token = when (val auth = validAccessToken()) {
-            is AccountResult.Success -> auth.value
-            is AccountResult.Error -> return auth
-        }
-        return client.sessions(token)
-    }
+    suspend fun listSessions(): AccountResult<List<DeviceSession>> =
+        callWithRefresh { token -> client.sessions(token) }
 
-    suspend fun revokeSession(sessionId: String): AccountResult<Unit> {
-        val token = when (val auth = validAccessToken()) {
-            is AccountResult.Success -> auth.value
-            is AccountResult.Error -> return auth
-        }
-        return client.revokeSession(token, sessionId)
-    }
+    suspend fun revokeSession(sessionId: String): AccountResult<Unit> =
+        callWithRefresh { token -> client.revokeSession(token, sessionId) }
 
     /**
      * Revokes the session server-side when possible and always clears the
@@ -176,50 +162,132 @@ class SessionManager private constructor(
      * which callers should surface instead of swallowing.
      */
     suspend fun logout(): Boolean {
-        val token = (validAccessToken() as? AccountResult.Success)?.value
-        val revoked = if (token != null) client.logout(token) is AccountResult.Success else false
-        clearLocalSession()
-        return revoked
+        return try {
+            val result = callWithRefresh { token -> client.logout(token) }
+            result is AccountResult.Success
+        } finally {
+            clearLocalSession()
+        }
     }
 
     fun clearLocalSession() {
-        accessToken = null
-        accessExpiresAtMs = 0
-        quota = null
-        user = null
-        settings.clearAccount()
+        synchronized(sessionStateLock) {
+            clearLocalSessionLocked()
+        }
     }
 
-    private fun refreshLocked(): AccountResult<String> {
-        val refreshToken = secrets.getString(REFRESH_TOKEN)
+    private suspend fun <T> callWithRefresh(
+        generation: Long = sessionGeneration.get(),
+        request: (String) -> AccountResult<T>,
+    ): AccountResult<T> {
+        val token = when (val auth = validAccessToken()) {
+            is AccountResult.Success -> auth.value
+            is AccountResult.Error -> return auth
+        }
+        if (sessionGeneration.get() != generation) {
+            return AccountResult.Error("AUTH_REQUIRED", "Your session ended.", false, 401)
+        }
+        val first = withContext(ioDispatcher) { request(token) }
+        val finalResult = if (first is AccountResult.Error && first.code == "TOKEN_EXPIRED") {
+            when (val refreshed = refreshAfterRejected(token)) {
+                is AccountResult.Success -> {
+                    if (sessionGeneration.get() != generation) {
+                        return AccountResult.Error("AUTH_REQUIRED", "Your session ended.", false, 401)
+                    }
+                    withContext(ioDispatcher) { request(refreshed.value) }
+                }
+                is AccountResult.Error -> refreshed
+            }
+        } else first
+        if (finalResult is AccountResult.Error &&
+            (finalResult.code == "ACCOUNT_SUSPENDED" || finalResult.code == "ACCOUNT_BANNED")
+        ) {
+            synchronized(sessionStateLock) {
+                if (sessionGeneration.get() == generation) {
+                    markRestrictedLocked(finalResult.code, finalResult.message)
+                }
+            }
+        }
+        return finalResult
+    }
+
+    private suspend fun refreshLocked(): AccountResult<String> {
+        val (generation, refreshToken) = synchronized(sessionStateLock) {
+            val gen = sessionGeneration.get()
+            val stored = secrets.getString(REFRESH_TOKEN)
+            if (stored.isNullOrBlank()) {
+                clearLocalSessionLocked()
+            }
+            gen to stored
+        }
         if (refreshToken.isNullOrBlank()) {
-            clearLocalSession()
             return AccountResult.Error("AUTH_REQUIRED", "Sign in to use voice input.", false, 401)
         }
-        return when (val result = client.refresh(refreshToken)) {
-            is AccountResult.Success -> {
-                install(result.value)
-                AccountResult.Success(result.value.accessToken)
+        return when (val result = withContext(ioDispatcher) { client.refresh(refreshToken) }) {
+            is AccountResult.Success -> synchronized(sessionStateLock) {
+                if (sessionGeneration.get() != generation) {
+                    AccountResult.Error("AUTH_REQUIRED", "Your session ended.", false, 401)
+                } else {
+                    installLocked(result.value)
+                    AccountResult.Success(result.value.accessToken)
+                }
             }
-            is AccountResult.Error -> {
-                if (result.code == "AUTH_REQUIRED") clearLocalSession()
+            is AccountResult.Error -> synchronized(sessionStateLock) {
+                if (sessionGeneration.get() == generation) {
+                    if (result.code == "AUTH_REQUIRED") clearLocalSessionLocked()
+                    else if (result.code == "ACCOUNT_SUSPENDED" || result.code == "ACCOUNT_BANNED") {
+                        markRestrictedLocked(result.code, result.message)
+                    }
+                }
                 result
             }
         }
     }
 
-    private fun install(tokens: SessionTokens) {
+    private fun clearLocalSessionLocked() {
+        sessionGeneration.incrementAndGet()
+        accessToken = null
+        accessExpiresAtMs = 0
+        quota = null
+        user = null
+        secrets.remove(REFRESH_TOKEN)
+        clearPendingLogin()
+        secrets.remove(VAULT_KEY)
+        secrets.remove(RECOVERY_SECRET)
+        settings.clearAccount()
+    }
+
+    private fun markRestrictedLocked(code: String, message: String, suspendedUntilMs: Long? = null) {
+        val state = when (code) {
+            "ACCOUNT_SUSPENDED" -> AccountState.SUSPENDED
+            "ACCOUNT_BANNED" -> AccountState.BANNED
+            else -> return
+        }
+        val current = user ?: storedUser() ?: return
+        installUserLocked(
+            current.copy(
+                accountStatus = AccountStatus(
+                    state = state,
+                    suspendedUntilMs = if (state == AccountState.SUSPENDED) suspendedUntilMs else null,
+                    publicMessage = message.trim().takeIf(String::isNotBlank),
+                    supportEmail = current.accountStatus.supportEmail,
+                ),
+            ),
+        )
+    }
+
+    private fun installLocked(tokens: SessionTokens) {
         accessToken = tokens.accessToken
         // Clamp the TTL: a hostile or buggy value must not overflow into a
         // negative expiry (perpetual refresh) or lock a token in for years.
-        accessExpiresAtMs = System.currentTimeMillis() +
+        accessExpiresAtMs = clock() +
             tokens.accessExpiresInSeconds.coerceIn(0L, MAX_ACCESS_TTL_SECONDS) * 1_000L
         secrets.putString(REFRESH_TOKEN, tokens.refreshToken)
         settings.accountId = tokens.user.id
-        installUser(tokens.user)
+        installUserLocked(tokens.user)
     }
 
-    private fun installUser(value: AccountUser) {
+    private fun installUserLocked(value: AccountUser) {
         user = value
         settings.accountId = value.id
         settings.accountEmail = value.email
@@ -250,15 +318,24 @@ class SessionManager private constructor(
         supportEmail = settings.accountSupportEmail,
     )
 
+    private fun isPendingLoginExpired(): Boolean {
+        val createdAt = secrets.getString(PENDING_PKCE_CREATED_AT)?.toLongOrNull() ?: return true
+        val elapsed = clock() - createdAt
+        return elapsed > PENDING_PKCE_TTL_MS || elapsed < -CLOCK_SKEW_MS
+    }
+
     private fun clearPendingLogin() {
         secrets.remove(PENDING_PKCE_VERIFIER)
         secrets.remove(PENDING_PKCE_STATE)
         secrets.remove(PENDING_AUTH_INTENT)
+        secrets.remove(PENDING_PKCE_CREATED_AT)
     }
 
     companion object {
         const val AUTH_LOGIN = "login"
         const val AUTH_DELETE = "delete"
+        internal const val PENDING_PKCE_TTL_MS = 15 * 60_000L
+        private const val CLOCK_SKEW_MS = 60_000L
         private const val EXPIRY_SKEW_MS = 30_000L
 
         // The server issues 15-minute access tokens; anything claiming longer
@@ -278,8 +355,12 @@ class SessionManager private constructor(
             baseUrlProvider: () -> String,
             deviceNameProvider: () -> String,
         ): SessionManager = instance ?: synchronized(this) {
-            instance ?: SessionManager(secrets, settings, baseUrlProvider, deviceNameProvider)
-                .also { instance = it }
+            instance ?: SessionManager(
+                secrets = secrets,
+                settings = settings,
+                client = AccountClient(baseUrlProvider),
+                deviceName = deviceNameProvider,
+            ).also { instance = it }
         }
     }
 }

@@ -31,15 +31,21 @@ object EditorPolicy {
         )
     }
 
-    fun actionLabel(editorInfo: EditorInfo?): String {
-        val action = (editorInfo?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
-        return when (action) {
-            EditorInfo.IME_ACTION_GO -> "Go"
-            EditorInfo.IME_ACTION_NEXT -> "Next"
-            EditorInfo.IME_ACTION_SEARCH -> "Search"
-            EditorInfo.IME_ACTION_SEND -> "Send"
-            EditorInfo.IME_ACTION_DONE -> "Done"
-            else -> "↵"
-        }
+    fun effectiveAction(imeOptions: Int): Int {
+        if (imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0) return EditorInfo.IME_ACTION_NONE
+        return imeOptions and EditorInfo.IME_MASK_ACTION
     }
+
+    fun effectiveAction(editorInfo: EditorInfo?): Int = effectiveAction(editorInfo?.imeOptions ?: 0)
+
+    fun actionLabel(imeOptions: Int): String = when (effectiveAction(imeOptions)) {
+        EditorInfo.IME_ACTION_GO -> "Go"
+        EditorInfo.IME_ACTION_NEXT -> "Next"
+        EditorInfo.IME_ACTION_SEARCH -> "Search"
+        EditorInfo.IME_ACTION_SEND -> "Send"
+        EditorInfo.IME_ACTION_DONE -> "Done"
+        else -> "↵"
+    }
+
+    fun actionLabel(editorInfo: EditorInfo?): String = actionLabel(editorInfo?.imeOptions ?: 0)
 }

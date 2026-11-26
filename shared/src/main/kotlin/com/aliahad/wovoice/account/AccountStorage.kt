@@ -27,6 +27,12 @@ interface AccountSettings {
     /** Account whose one-time move from the old recovery-key vault has finished on this device. */
     var cloudSyncMigratedAccount: String?
 
+    fun isCloudSyncMigrated(accountId: String): Boolean = cloudSyncMigratedAccount == accountId
+
+    fun markCloudSyncMigrated(accountId: String) {
+        cloudSyncMigratedAccount = accountId
+    }
+
     /** The account's cloud-sync choices, cached from the server for offline use. */
     var historySyncEnabled: Boolean
     var historyRetentionDays: Int?
@@ -46,6 +52,7 @@ object SecretNames {
     const val PENDING_PKCE_VERIFIER = "pending_pkce_verifier"
     const val PENDING_PKCE_STATE = "pending_pkce_state"
     const val PENDING_AUTH_INTENT = "pending_auth_intent"
+    const val PENDING_PKCE_CREATED_AT = "pending_pkce_created_at"
     /** Old recovery-key vault material, read only to import the vault once into cloud sync. */
     const val VAULT_KEY = "vault_key"
     const val RECOVERY_SECRET = "recovery_secret"
@@ -58,4 +65,5 @@ interface SyncAccount {
     val restrictionMessage: String
     suspend fun validAccessToken(): AccountResult<String>
     suspend fun refreshAfterRejected(rejectedToken: String): AccountResult<String>
+    fun markRestricted(code: String, message: String, suspendedUntilMs: Long? = null) {}
 }

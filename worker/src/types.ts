@@ -1,13 +1,14 @@
 import type { DictationContext } from "./context";
-import type { AiConfiguration } from "./ai-config";
+import type { AiConfiguration, PolishLevel } from "./ai-config";
 
+export type { PolishLevel };
 export type AsrModel = "whisper" | "nova-3";
 export type AccountRole = "user" | "admin";
 export type AccountState = "active" | "suspended" | "banned";
 
 export interface TranscriptionOptions {
-  locale: "en-IN";
-  polish: "light";
+  locale: string;
+  polish: PolishLevel;
   sentenceStart: boolean;
   commands: Array<"new_line" | "new_paragraph">;
   glossary: string[];
@@ -62,6 +63,7 @@ export type AppEnv = Omit<
   APP_ORIGIN: string;
   ENVIRONMENT: string;
   SUPPORT_EMAIL?: string;
+  EMAIL_FROM?: string;
   ADMIN_BOOTSTRAP_EMAIL?: string;
   /** Key-encryption key (32 bytes, base64url) wrapping each account's sync data key. */
   SYNC_KEK: string;

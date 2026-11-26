@@ -1,23 +1,35 @@
-import { createHash, randomBytes } from 'crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'crypto'
 import { createServer, type Server } from 'http'
 import { hostname } from 'os'
 import { shell } from 'electron'
 
+export type AuthIntent = 'login' | 'delete'
+
+function constantTimeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a, 'utf-8')
+  const right = Buffer.from(b, 'utf-8')
+  if (left.length !== right.length) return false
+  return timingSafeEqual(left, right)
+}
+
 /**
- * Passwordless sign-in: PKCE (S256) + system browser + a loopback HTTP server
- * that receives the authorization code. The Worker's auth page redirects to
- * http://127.0.0.1:<port>/callback when opened with platform=desktop.
+ * Passwordless sign-in and deletion re-authentication: PKCE (S256) + system
+ * browser + a loopback HTTP server that receives the authorization code or
+ * reauth token. The Worker's auth page redirects to http://127.0.0.1:<port>/callback
+ * when opened with platform=desktop.
  */
 export class DesktopAuth {
   private server: Server | null = null
+  private port: number | null = null
   private verifier: string | null = null
   private state: string | null = null
   private settled = false
 
   constructor(
     private readonly workerUrl: string,
-    private readonly onCompleted: (authorizationCode: string) => void,
-    private readonly onFailed: (message: string) => void
+    private readonly onCompleted: (token: string) => void,
+    private readonly onFailed: (message: string) => void,
+    readonly intent: AuthIntent = 'login'
   ) {}
 
   private pkce(): { verifier: string; challenge: string; state: string } {
@@ -28,44 +40,65 @@ export class DesktopAuth {
   }
 
   async start(): Promise<{ ok: boolean; message?: string }> {
-    if (this.server !== null) return { ok: false, message: 'Sign-in is already in progress.' }
+    if (this.server !== null) {
+      return {
+        ok: false,
+        message:
+          this.intent === 'delete'
+            ? 'Account deletion confirmation is already in progress.'
+            : 'Sign-in is already in progress.'
+      }
+    }
     this.settled = false
     const { verifier, challenge, state } = this.pkce()
     this.verifier = verifier
     this.state = state
 
     const port = await this.listen()
+    this.port = port
 
     const authUrl = new URL('/auth', this.workerUrl)
     authUrl.searchParams.set('code_challenge', challenge)
     authUrl.searchParams.set('state', state)
     authUrl.searchParams.set('platform', 'desktop')
     authUrl.searchParams.set('redirect_port', String(port))
+    if (this.intent === 'delete') {
+      authUrl.searchParams.set('intent', 'delete')
+    }
 
     this.awaitCallback()
 
     await shell.openExternal(authUrl.toString())
-    return { ok: true, message: 'Complete sign-in in your browser.' }
+    return {
+      ok: true,
+      message:
+        this.intent === 'delete'
+          ? 'Verify your email in your browser to delete your account.'
+          : 'Complete sign-in in your browser.'
+    }
   }
 
   /**
-   * Completes sign-in from the wovoice:// deep link (fallback when the
-   * loopback listener missed the response, e.g. app restarted mid-sign-in).
+   * Completes sign-in or delete verification from a wovoice:// / livoice://
+   * deep link (fallback when the loopback listener missed the response).
    */
-  handleExternalCallback(authorizationCode: string, returnedState: string): void {
+  handleExternalCallback(token: string, returnedState: string): void {
     if (this.settled) return
-    if (this.state === null || returnedState !== this.state) {
-      this.onFailed('The sign-in response could not be verified. Please try again.')
+    const trimmedToken = token.trim()
+    if (!trimmedToken || this.state === null || !constantTimeEqual(returnedState, this.state)) {
+      this.settled = true
+      this.closeServer()
+      this.onFailed('The verification response could not be verified. Please try again.')
       return
     }
     this.settled = true
     this.closeServer()
-    this.onCompleted(authorizationCode)
+    this.onCompleted(trimmedToken)
   }
 
   /**
    * Releases the loopback listener and pending PKCE state — used when sign-in
-   * is abandoned (timeout, failure) so a fresh attempt can start afterwards.
+   * is abandoned (cancel, timeout, failure) so a fresh attempt can start immediately.
    */
   dispose(): void {
     this.settled = true
@@ -74,14 +107,38 @@ export class DesktopAuth {
     this.state = null
   }
 
-  /** Waits for the loopback callback, then hands the code to onCompleted. */
+  /** Waits for the loopback callback, then hands the token to onCompleted. */
   private awaitCallback(): void {
     const server = this.server
     if (server === null) return
-    let handled = false
+    const expectedHost = this.port !== null ? `127.0.0.1:${this.port}` : null
+    const paramName = this.intent === 'delete' ? 'reauth_token' : 'code'
+    const successHtml =
+      this.intent === 'delete'
+        ? '<!doctype html><meta charset="utf-8"><title>LiVoice</title>' +
+          '<p style="font-family:system-ui;padding:2rem">Verification complete — return to the LiVoice app.</p>'
+        : '<!doctype html><meta charset="utf-8"><title>LiVoice</title>' +
+          '<p style="font-family:system-ui;padding:2rem">Sign-in complete — return to the LiVoice app.</p>'
+
     server.on('request', (request, response) => {
-      const url = new URL(request.url ?? '/', 'http://127.0.0.1')
       const headers = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }
+
+      // Defend against DNS rebinding against the local loopback listener.
+      const host = request.headers.host ?? ''
+      if (expectedHost !== null && host !== expectedHost) {
+        response.writeHead(403, headers)
+        response.end('Forbidden')
+        return
+      }
+
+      let url: URL
+      try {
+        url = new URL(request.url ?? '/', 'http://127.0.0.1')
+      } catch {
+        response.writeHead(400, headers)
+        response.end('Bad request')
+        return
+      }
 
       if (url.pathname !== '/callback') {
         response.writeHead(404, headers)
@@ -89,43 +146,60 @@ export class DesktopAuth {
         return
       }
 
-      response.writeHead(200, headers)
-      response.end(
-        '<!doctype html><meta charset="utf-8"><title>LiVoice</title>' +
-          '<p style="font-family:system-ui;padding:2rem">Sign-in complete — return to the LiVoice app.</p>'
-      )
+      if (this.settled) {
+        response.writeHead(200, headers)
+        response.end(successHtml)
+        return
+      }
 
-      const code = url.searchParams.get('code') ?? ''
+      // Claim settlement synchronously so a racing deep link or browser retry
+      // cannot run completion twice.
+      this.settled = true
+      const token = (url.searchParams.get(paramName) ?? '').trim()
       const returnedState = url.searchParams.get('state') ?? ''
-      // A browser retry must not run the completion twice (the second
-      // exchange would fail after the verifier was consumed).
-      setImmediate(() => {
-        if (handled) return
-        handled = true
-        this.closeServer()
 
-        if (!code || returnedState !== this.state) {
+      response.writeHead(200, headers)
+      response.end(successHtml)
+
+      setImmediate(() => {
+        this.closeServer()
+        if (!token || this.state === null || !constantTimeEqual(returnedState, this.state)) {
           this.onFailed('The sign-in response could not be verified. Please try again.')
           return
         }
-        this.onCompleted(code)
+        this.onCompleted(token)
       })
     })
   }
 
   private closeServer(): void {
-    this.server?.close()
+    const server = this.server
     this.server = null
+    this.port = null
+    if (server === null) return
+    try {
+      server.close()
+      server.closeAllConnections?.()
+    } catch {
+      // ignore close errors
+    }
   }
 
   private listen(): Promise<number> {
     return new Promise((resolve, reject) => {
-      this.server = createServer()
-      this.server.on('error', (error) => reject(error))
-      this.server.listen(0, '127.0.0.1', () => {
-        const bound = this.server
-        const address = bound?.address()
-        if (bound === null || address === null || address === undefined || typeof address === 'string') {
+      const server = createServer()
+      this.server = server
+      server.on('error', (error) => {
+        if (this.server === server) {
+          this.server = null
+          this.port = null
+        }
+        reject(error)
+      })
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address()
+        if (address === null || typeof address === 'string') {
+          this.closeServer()
           reject(new Error('Could not bind the loopback sign-in listener.'))
           return
         }
@@ -147,6 +221,20 @@ export class DesktopAuth {
       code: authorizationCode,
       codeVerifier: verifier,
       deviceName: desktopDeviceName()
+    }
+  }
+
+  buildDeleteRequest(reauthToken: string): {
+    reauthToken: string
+    codeVerifier: string
+  } {
+    if (this.verifier === null) throw new Error('No deletion verification is in progress.')
+    const verifier = this.verifier
+    this.verifier = null
+    this.state = null
+    return {
+      reauthToken,
+      codeVerifier: verifier
     }
   }
 }

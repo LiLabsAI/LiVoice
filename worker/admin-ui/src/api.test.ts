@@ -4,6 +4,8 @@ import { readCookie, safeReturnTo } from "./api";
 describe("admin browser security helpers", () => {
   it("allows only local admin return paths", () => {
     expect(safeReturnTo("/admin/users/123?tab=activity")).toBe("/admin/users/123?tab=activity");
+    expect(safeReturnTo("/admin")).toBe("/admin");
+    expect(safeReturnTo("/admin-evil/path")).toBe("/admin/");
     expect(safeReturnTo("https://attacker.example/admin")).toBe("/admin/");
     expect(safeReturnTo("//attacker.example/admin")).toBe("/admin/");
   });

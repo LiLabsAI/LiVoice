@@ -29,7 +29,7 @@ beforeEach(async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.clearAllMocks();
   const defaults = defaultAiConfiguration();
-  data = { version: 0, active: null, draft: null, defaults, effective: defaults, catalog: AI_MODEL_CATALOG, safeguards: { locale: "en-IN", maxAudioSeconds: 60, maxCleanupInputBytes: 8192, baseDailyAudioSeconds: 600, globalDailyNeurons: 8000, monthlyEmails: 3000, cleanupReservedNeurons: 200 } };
+  data = { version: 0, active: null, draft: null, defaults, effective: defaults, catalog: AI_MODEL_CATALOG, safeguards: { locale: "en-IN", maxAudioSeconds: 60, maxCleanupInputBytes: 8192, baseDailyAudioSeconds: 600, globalDailyNeurons: 8000, monthlyEmails: 2500, cleanupReservedNeurons: 200 } };
   api.mockImplementation(async (path, options) => {
     if (path === "/ai/config") return structuredClone(data);
     const body = options?.body as { config: AiConfiguration; reason: string };

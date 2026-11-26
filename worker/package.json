@@ -9,14 +9,10 @@
     "build": "npm run build:admin && npm run check",
     "build:admin": "vite build --config admin-ui/vite.config.ts",
     "check": "tsc --noEmit && tsc --noEmit -p admin-ui/tsconfig.json",
-    "deploy": "wrangler deploy",
+    "deploy": "npm run build && wrangler deploy",
     "dev": "wrangler dev",
     "test": "vitest run && vitest run --config admin-ui/vitest.config.ts",
     "types": "wrangler types"
-  },
-  "dependencies": {
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.20.1",
@@ -25,6 +21,8 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.5",
     "jsdom": "26.1.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
     "typescript": "7.0.2",
     "vite": "8.2.0",
     "vitest": "4.1.10",

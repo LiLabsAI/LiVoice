@@ -155,16 +155,34 @@ export async function restoreExpiredAccount(env: AppEnv, userId: string, now = D
   return true;
 }
 
+const USER_ACTIVITY_TYPES = new Set<ActivityEvent["type"]>([
+  "account_created",
+  "login_succeeded",
+  "logout",
+  "transcription_succeeded",
+  "transcription_failed",
+  "quota_rejected",
+  "sync_pulled",
+  "sync_pushed",
+  "sync_conflict",
+]);
+
 export async function recordActivity(env: AppEnv, event: ActivityEvent): Promise<void> {
   const now = event.createdAt ?? Date.now();
   const dateKey = new Date(now).toISOString().slice(0, 10);
   const statements: D1PreparedStatement[] = [
     env.DB.prepare("INSERT OR IGNORE INTO service_daily_aggregates(date_key) VALUES(?)").bind(dateKey),
-    env.DB.prepare(
-      "UPDATE users SET last_activity_at = CASE WHEN last_activity_at IS NULL OR last_activity_at < ? THEN ? ELSE last_activity_at END WHERE id = ?",
-    ).bind(now, now, event.userId),
-    env.DB.prepare("INSERT OR IGNORE INTO service_daily_active_users(date_key, user_id) VALUES(?, ?)")
-      .bind(dateKey, event.userId),
+  ];
+  if (USER_ACTIVITY_TYPES.has(event.type)) {
+    statements.push(
+      env.DB.prepare(
+        "UPDATE users SET last_activity_at = CASE WHEN last_activity_at IS NULL OR last_activity_at < ? THEN ? ELSE last_activity_at END WHERE id = ?",
+      ).bind(now, now, event.userId),
+      env.DB.prepare("INSERT OR IGNORE INTO service_daily_active_users(date_key, user_id) VALUES(?, ?)")
+        .bind(dateKey, event.userId),
+    );
+  }
+  statements.push(
     env.DB.prepare(
       `INSERT INTO user_activity_events
         (id, user_id, event_type, request_id, status_code, outcome_code, model, audio_seconds,
@@ -186,7 +204,7 @@ export async function recordActivity(env: AppEnv, event: ActivityEvent): Promise
       event.deviceName?.replace(/[\u0000-\u001f\u007f]/gu, "").slice(0, 80) ?? null,
       now,
     ),
-  ];
+  );
 
   if (event.type === "account_created") {
     statements.push(env.DB.prepare(
@@ -263,12 +281,25 @@ export async function processModerationNotifications(
     email_nonce: string;
   }>();
 
+  let processed = 0;
   for (const notification of pending.results) {
-    const monthKey = new Date(now).toISOString().slice(0, 7);
+    const claimTime = Date.now();
+    const leaseUntil = claimTime + 5 * 60_000;
+    // Atomically lease the row so concurrent waitUntil and cron runners cannot
+    // deliver the same moderation notice twice or double-charge email budget.
+    const claim = await env.DB.prepare(
+      `UPDATE moderation_notifications
+       SET next_attempt_at = ?, updated_at = ?
+       WHERE id = ? AND status = 'pending' AND next_attempt_at <= ?`,
+    ).bind(leaseUntil, claimTime, notification.id, now).run();
+    if ((claim.meta.changes ?? 0) !== 1) continue;
+    processed += 1;
+
+    const monthKey = new Date(claimTime).toISOString().slice(0, 7);
     let counted = false;
     let delivered = false;
     try {
-      await env.DB.batch([
+      const budget = await env.DB.batch([
         env.DB.prepare(
           "INSERT OR IGNORE INTO service_monthly_usage(month_key, verification_emails, moderation_emails) VALUES(?, 0, 0)",
         ).bind(monthKey),
@@ -276,6 +307,7 @@ export async function processModerationNotifications(
           "UPDATE service_monthly_usage SET moderation_emails = moderation_emails + 1 WHERE month_key = ?",
         ).bind(monthKey),
       ]);
+      if ((budget[1]?.meta.changes ?? 0) !== 1) throw new Error("EMAIL_RATE_LIMITED");
       counted = true;
       const email = await decryptString(env.PII_KEY, notification.email_ciphertext, notification.email_nonce);
       await services.sendModerationEmail(env, {
@@ -285,12 +317,29 @@ export async function processModerationNotifications(
         effectiveUntil: notification.effective_until,
       });
       delivered = true;
-      await env.DB.prepare(
-        `UPDATE moderation_notifications SET status = 'sent', attempts = attempts + 1,
-           last_error = NULL, sent_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'`,
-      ).bind(Date.now(), Date.now(), notification.id).run();
+      try {
+        const sentAt = Date.now();
+        await env.DB.prepare(
+          `UPDATE moderation_notifications SET status = 'sent', attempts = attempts + 1,
+             last_error = NULL, sent_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'`,
+        ).bind(sentAt, sentAt, notification.id).run();
+      } catch (markError) {
+        // The email has already been delivered; never reset the row back to a
+        // retryable pending state that would re-deliver to the user.
+        console.error(JSON.stringify({
+          event: "moderation_notification_mark_sent_failed",
+          notificationId: notification.id,
+          reason: safeFailure(markError),
+        }));
+        const fallbackAt = Date.now();
+        await env.DB.prepare(
+          `UPDATE moderation_notifications SET status = 'sent', attempts = attempts + 1,
+             last_error = ?, sent_at = ?, updated_at = ? WHERE id = ? AND status = 'pending'`,
+        ).bind(safeFailure(markError), fallbackAt, fallbackAt, notification.id).run().catch(() => undefined);
+      }
     } catch (error) {
-      if (counted && !delivered) {
+      if (delivered) continue;
+      if (counted) {
         // Nothing was delivered: give the monthly email budget its slot back, as
         // the verification-email path already does, or retries drain it.
         await env.DB.prepare(
@@ -300,20 +349,21 @@ export async function processModerationNotifications(
       const attempts = notification.attempts + 1;
       const failed = attempts >= 3;
       const backoff = attempts === 1 ? 5 * 60_000 : attempts === 2 ? 30 * 60_000 : 2 * 60 * 60_000;
+      const failedAt = Date.now();
       await env.DB.prepare(
         `UPDATE moderation_notifications SET status = ?, attempts = ?, next_attempt_at = ?,
            last_error = ?, updated_at = ? WHERE id = ? AND status = 'pending'`,
       ).bind(
         failed ? "failed" : "pending",
         attempts,
-        Date.now() + backoff,
+        failedAt + backoff,
         safeFailure(error),
-        Date.now(),
+        failedAt,
         notification.id,
       ).run();
     }
   }
-  return pending.results.length;
+  return processed;
 }
 
 export async function reactivateExpiredSuspensions(env: AppEnv, limit = 50): Promise<number> {

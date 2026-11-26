@@ -1,17 +1,49 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LiVoice Privacy Policy</title><link rel="icon" href="/media/logo.svg" type="image/svg+xml"><link rel="stylesheet" href="/styles.css"></head>
-<body><main class="legal">
-  <div class="brand"><span class="mark"></span>LiVoice</div>
-  <h1>Privacy Policy</h1><p>Effective November 3, 2026. Optional automatic context update.</p>
-  <h2>What LiVoice processes</h2><p>LiVoice sends a recording, approved glossary terms, and transcription options to Cloudflare Workers AI when you request a transcription. Audio, raw speech recognition output, surrounding editor text, and source-application identity are not retained.</p>
-  <h2>Optional automatic context</h2><p>Automatic context is off until you enable it for your account on a device. App and field mode detects the writing task locally and sends only a category, such as chat or email, and your style preference; application identifiers and field labels stay on your device. Nearby text requires a separate affirmative choice and may send up to 512 characters before and 128 after the selected insertion point, within a 2 KB text budget, with that recording. Only the focused editor is used, not full conversations, contacts, notifications, screenshots, or clipboard contents. Password and supported sensitive fields are excluded. Context guides faithful grammar and tone for that request; raw snippets and recipient clues are not saved in history, sync, operational logs, or administration. Turning context off prevents new context capture and transmission. These choices can be changed at any time in each device’s settings.</p>
-  <h2>Account information</h2><p>LiVoice stores your verified email in encrypted form, token hashes, session metadata, account status, and usage required to provide and protect the free service.</p>
-  <h2>Operational activity and administration</h2><p>The sole LiVoice administrator can review verified account email, sign-in and session events, dictation duration and outcome, model, processing time, estimated AI usage, quota events, and the number and size of synced records. The administration console does not expose users’ dictated text, audio, dictionary contents, editor context, source applications, or synced record contents. AI workspace tests display only samples entered by the administrator. Identifiable operational and administrative-audit events are retained for up to 90 days. Non-identifying daily service totals are retained for up to 13 months.</p>
-  <h2>Administrator sign-in</h2><p>The administration console uses a one-time email code, Turnstile, and short-lived first-party browser cookies. LiVoice stores only hashed administrator session and security tokens. It does not store passwords, one-time codes, IP addresses, or browser tokens in readable form.</p>
-  <h2>Account restrictions and notices</h2><p>Accounts that misuse or threaten the shared service may be suspended or banned. LiVoice records the action and sends a privacy-safe account notice. Questions and appeals may be sent to support@aliahad.com.</p>
-  <h2>Cloud sync</h2><p>When you sign in, your final dictation history, dictionary entries, and usage analytics are stored in your LiVoice account so every device you sign in on shows them. There is no recovery key: signing in is all a device needs.</p><p>Records are encrypted before they are written to storage, using a key unique to your account that is itself protected by a LiVoice server secret. Because LiVoice holds these keys, the LiVoice service can decrypt your synced records in order to deliver them to your devices. They are never shown in the administration console and are not used for any other purpose.</p><p>You control what is stored: turn off <em>Sync history</em> to delete your dictated text from your account and keep new dictations on the device that made them, or choose <em>Auto-delete history</em> to remove dictations older than 30 days, 90 days, or one year from your account and every signed-in device. Deleting an item or clearing history deletes it from your account too.</p><p>Earlier versions offered end-to-end encrypted sync with a recovery key. A device that still holds that key moves its records into cloud sync once, after which the old encrypted copies are deleted.</p>
-  <h2>Deletion</h2><p>You can delete synced items or your account from LiVoice settings, including while an account is restricted after fresh email verification. Logical account data and identifiable operational activity are deleted immediately; encrypted platform backups may remain for Cloudflare’s applicable recovery window.</p>
-  <h2>Service providers</h2><p>Cloudflare provides hosting, D1 storage, email verification and notices, Turnstile, and AI inference. LiVoice includes no advertising, third-party analytics, or crash-reporting SDK.</p>
-  <footer><a href="/">Home</a> · <a href="/terms">Terms</a> · <a href="/delete-account">Delete account</a></footer>
-</main></body></html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>LiVoice Privacy Policy</title>
+    <link rel="icon" href="/media/logo.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="legal">
+      <div class="brand"><span class="mark" aria-hidden="true"></span>LiVoice</div>
+      <h1>Privacy Policy</h1>
+      <p>Effective November 3, 2026. Optional automatic context update.</p>
+
+      <h2>What LiVoice processes</h2>
+      <p>LiVoice sends a recording, approved glossary terms, and transcription options to Cloudflare Workers AI when you request a transcription. Audio, raw speech recognition output, surrounding editor text, and source-application identity are not retained.</p>
+
+      <h2>Optional automatic context</h2>
+      <p>Automatic context is off until you enable it for your account on a device. App and field mode detects the writing task locally and sends only a category, such as chat or email, and your style preference; application identifiers and field labels stay on your device. Nearby text requires a separate affirmative choice and may send up to 512 characters before and 128 after the selected insertion point, within a 2 KB text budget, with that recording. Only the focused editor is used, not full conversations, contacts, notifications, screenshots, or clipboard contents. Password and supported sensitive fields are excluded. Context guides faithful grammar and tone for that request; raw snippets and recipient clues are not saved in history, sync, operational logs, or administration. Turning context off prevents new context capture and transmission. These choices can be changed at any time in each device’s settings.</p>
+
+      <h2>Account information</h2>
+      <p>LiVoice stores your verified email in encrypted form, token hashes, session metadata, account status, and usage required to provide and protect the free service.</p>
+
+      <h2>Operational activity and administration</h2>
+      <p>The sole LiVoice administrator can review verified account email, sign-in and session events, dictation duration and outcome, model, processing time, estimated AI usage, quota events, and the number and size of synced records. The administration console does not expose users’ dictated text, audio, dictionary contents, editor context, source applications, or synced record contents. AI workspace tests display only samples entered by the administrator. Identifiable operational and administrative-audit events are retained for up to 90 days. Non-identifying daily service totals are retained for up to 13 months.</p>
+
+      <h2>Administrator sign-in</h2>
+      <p>The administration console uses a one-time email code, Turnstile, and short-lived first-party browser cookies. LiVoice stores only hashed administrator session and security tokens. It does not store passwords, one-time codes, IP addresses, or browser tokens in readable form.</p>
+
+      <h2>Account restrictions and notices</h2>
+      <p>Accounts that misuse or threaten the shared service may be suspended or banned. LiVoice records the action and sends a privacy-safe account notice. Questions and appeals may be sent to support@aliahad.com.</p>
+
+      <h2>Cloud sync</h2>
+      <p>When you sign in, your final dictation history, dictionary entries, and usage analytics are stored in your LiVoice account so every device you sign in on shows them. There is no recovery key: signing in is all a device needs.</p>
+      <p>Records are encrypted before they are written to storage, using a key unique to your account that is itself protected by a LiVoice server secret. Because LiVoice holds these keys, the LiVoice service can decrypt your synced records in order to deliver them to your devices. They are never shown in the administration console and are not used for any other purpose.</p>
+      <p>You control what is stored: turn off <em>Sync history</em> to delete your dictated text from your account and keep new dictations on the device that made them, or choose <em>Auto-delete history</em> to remove dictations older than 30 days, 90 days, or one year from your account and every signed-in device. Deleting an item or clearing history deletes it from your account too.</p>
+      <p>Earlier versions offered end-to-end encrypted sync with a recovery key. A device that still holds that key moves its records into cloud sync once, after which the old encrypted copies are deleted.</p>
+
+      <h2>Deletion</h2>
+      <p>You can delete synced items or your account from LiVoice settings, including while an account is restricted after fresh email verification. Logical account data and identifiable operational activity are deleted immediately; encrypted platform backups may remain for Cloudflare’s applicable recovery window.</p>
+
+      <h2>Service providers</h2>
+      <p>Cloudflare provides hosting, D1 storage, email verification and notices, Turnstile, and AI inference. LiVoice includes no advertising, third-party analytics, or crash-reporting SDK.</p>
+
+      <footer><a href="/">Home</a> · <a href="/terms">Terms</a> · <a href="/delete-account">Delete account</a></footer>
+    </main>
+  </body>
+</html>

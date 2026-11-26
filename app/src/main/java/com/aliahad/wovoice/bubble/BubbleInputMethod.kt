@@ -74,6 +74,11 @@ internal class BubbleInputMethod(
         changed()
     }
 
+    fun isIncognitoInput(): Boolean {
+        val options = currentInputEditorInfo?.imeOptions ?: return false
+        return (options and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0
+    }
+
     fun activePackageName(): String? {
         val info = currentInputEditorInfo ?: return null
         return if (

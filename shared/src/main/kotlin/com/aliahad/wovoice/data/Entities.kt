@@ -6,7 +6,12 @@ import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "dictation_records",
-    indices = [Index(value = ["requestId"], unique = true)],
+    indices = [
+        Index(value = ["requestId"], unique = true),
+        Index(value = ["ownerAccountId", "createdAtMs"]),
+        Index(value = ["ownerAccountId", "syncId"]),
+        Index(value = ["ownerAccountId", "syncState"]),
+    ],
 )
 data class DictationRecord(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -35,7 +40,10 @@ data class DictationRecord(
     val syncState: String = SYNC_LOCAL,
 )
 
-@Entity(tableName = "daily_usage")
+@Entity(
+    tableName = "daily_usage",
+    indices = [Index(value = ["ownerAccountId", "lastEventAtMs"])],
+)
 data class DailyUsageAggregate(
     @PrimaryKey val dateKey: String,
     val localDate: String,
@@ -58,7 +66,10 @@ data class DailyUsageAggregate(
 
 @Entity(
     tableName = "dictionary_entries",
-    indices = [Index(value = ["ownerAccountId", "normalizedTerm"], unique = true)],
+    indices = [
+        Index(value = ["ownerAccountId", "normalizedTerm"], unique = true),
+        Index(value = ["ownerAccountId", "syncId"]),
+    ],
 )
 data class DictionaryEntry(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

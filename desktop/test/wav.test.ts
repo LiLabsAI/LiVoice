@@ -52,7 +52,7 @@ test('downsampling attenuates content above the 8 kHz Nyquist limit', () => {
   // In-band speech energy passes nearly untouched.
   const speech = resample(sine(48_000, 48_000, 300, 0.5), 48_000, 16_000)
   const speechRms = Math.sqrt(speech.reduce((sum, value) => sum + value * value, 0) / speech.length)
-  assert.ok(speechRms > 0.5 / Math.SQRT2 * 0.95, `speech rms ${speechRms}`)
+  assert.ok(speechRms > (0.5 / Math.SQRT2) * 0.95, `speech rms ${speechRms}`)
 })
 
 test('encodeWav writes a 16 kHz mono PCM header and clamps samples', () => {

@@ -9,6 +9,7 @@ import android.os.SystemClock
 import android.util.AttributeSet
 import android.view.View
 import com.aliahad.wovoice.ui.dp
+import com.aliahad.wovoice.ui.systemAnimationsEnabled
 import kotlin.math.log10
 import kotlin.math.sin
 
@@ -27,9 +28,16 @@ class WaveformView @JvmOverloads constructor(
     private val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(76, 76, 79) }
     private val bounds = RectF()
     private var active = false
+    private var animationsEnabled = true
     private var startedAt = 0L
 
+    fun setAnimationsEnabled(enabled: Boolean) {
+        animationsEnabled = enabled
+        invalidate()
+    }
+
     fun setLevel(rms: Float) {
+        if (!motionAllowed()) return
         targetLevels.copyInto(targetLevels, destinationOffset = 0, startIndex = 1)
         // Use a logarithmic display scale. Real speech on the target Redmi sits around -46 dBFS,
         // which looked motionless with the old linear multiplier even though recording was valid.
@@ -49,10 +57,13 @@ class WaveformView @JvmOverloads constructor(
         }
     }
 
+    private fun motionAllowed(): Boolean = animationsEnabled && context.systemAnimationsEnabled()
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        val motion = active && motionAllowed()
         val elapsed = SystemClock.uptimeMillis() - startedAt
-        val pulse = if (active) (sin(elapsed / 260.0).toFloat() + 1f) / 2f else 0f
+        val pulse = if (motion) (sin(elapsed / 260.0).toFloat() + 1f) / 2f else 0f
         val haloInset = context.dp(2) - context.dp(2) * pulse
         haloPaint.alpha = (105 - 42 * pulse).toInt()
         bounds.set(haloInset, haloInset, width - haloInset, height - haloInset)
@@ -67,16 +78,26 @@ class WaveformView @JvmOverloads constructor(
         val startX = (width - contentWidth) / 2f
         val spacing = contentWidth / (displayedLevels.size - 1f)
         displayedLevels.forEachIndexed { index, displayed ->
-            displayedLevels[index] += (targetLevels[index] - displayed) * 0.24f
-            val value = displayedLevels[index]
+            val value = if (motion) {
+                displayedLevels[index] = displayed + (targetLevels[index] - displayed) * 0.24f
+                displayedLevels[index]
+            } else {
+                STATIC_BAR_PATTERN[index]
+            }
             val barHeight = (availableHeight * value).coerceAtLeast(context.dp(8).toFloat())
             val x = startX + spacing * index
             canvas.drawLine(x, height / 2f - barHeight / 2f, x, height / 2f + barHeight / 2f, barPaint)
         }
-        if (active) postInvalidateDelayed(FRAME_DELAY_MS)
+        if (motion && isAttachedToWindow) postInvalidateDelayed(FRAME_DELAY_MS)
+    }
+
+    override fun onDetachedFromWindow() {
+        active = false
+        super.onDetachedFromWindow()
     }
 
     private companion object {
         const val FRAME_DELAY_MS = 33L
+        val STATIC_BAR_PATTERN = floatArrayOf(0.22f, 0.38f, 0.58f, 0.78f, 0.92f, 0.78f, 0.58f, 0.38f, 0.22f)
     }
 }

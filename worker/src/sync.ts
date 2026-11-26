@@ -1,6 +1,6 @@
 import { authenticateAccess } from "./auth";
 import { ApiError, errorResponse } from "./errors";
-import { noStoreJson, readJson } from "./http";
+import { noStoreEmpty, noStoreJson, readJson } from "./http";
 import { recordActivity, requireActiveAccount } from "./moderation";
 import { v1Sunset } from "./records";
 import type { AppEnv } from "./types";
@@ -106,10 +106,10 @@ export async function handleSyncRoute(request: Request, env: AppEnv, requestId: 
       env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND id != ? AND revoked_at IS NULL")
         .bind(Date.now(), principal.userId, principal.sessionId),
     ]);
-    return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
+    return noStoreEmpty(204);
   }
   if (request.method === "GET" && url.pathname === "/v1/sync") {
-    const cursor = Math.max(0, Number.parseInt(url.searchParams.get("cursor") ?? "0", 10) || 0);
+    const cursor = parseCursorParam(url.searchParams.get("cursor"));
     const limit = Math.min(MAX_BATCH_ITEMS, Math.max(1, Number.parseInt(url.searchParams.get("limit") ?? "100", 10) || 100));
     const rows = await env.DB.prepare(
       `SELECT c.seq, i.item_id, i.item_type, i.version, i.key_version, i.nonce,
@@ -118,20 +118,22 @@ export async function handleSyncRoute(request: Request, env: AppEnv, requestId: 
        JOIN sync_items i ON i.user_id = c.user_id AND i.item_type = c.item_type AND i.item_id = c.item_id
        WHERE c.user_id = ? AND c.seq > ?
        ORDER BY c.seq ASC LIMIT ?`,
-    ).bind(principal.userId, cursor, limit).all<SyncItemRow & { seq: number }>();
-    const nextCursor = rows.results.reduce((latest, row) => Math.max(latest, row.seq), cursor);
+    ).bind(principal.userId, cursor, limit + 1).all<SyncItemRow & { seq: number }>();
+    const hasMore = rows.results.length > limit;
+    const pageRows = rows.results.slice(0, limit);
+    const nextCursor = pageRows.reduce((latest, row) => Math.max(latest, row.seq), cursor);
     await recordActivity(env, {
       userId: principal.userId,
       type: "sync_pulled",
       requestId,
       statusCode: 200,
-      itemCount: rows.results.length,
+      itemCount: pageRows.length,
     });
     return noStoreJson({
       requestId,
       nextCursor,
-      hasMore: rows.results.length === limit,
-      items: rows.results.map(publicSyncItem),
+      hasMore,
+      items: pageRows.map(publicSyncItem),
     });
   }
   if (request.method === "POST" && url.pathname === "/v1/sync/batch") {
@@ -300,6 +302,18 @@ function nonNegativeInteger(value: unknown, label: string): number {
     throw new ApiError(400, "INVALID_REQUEST", false, `The ${label} is invalid.`);
   }
   return value;
+}
+
+function parseCursorParam(raw: string | null): number {
+  if (raw === null || raw === "") return 0;
+  if (!/^\d+$/u.test(raw)) {
+    throw new ApiError(400, "INVALID_REQUEST", false, "The sync cursor is invalid.");
+  }
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new ApiError(400, "INVALID_REQUEST", false, "The sync cursor is invalid.");
+  }
+  return parsed;
 }
 
 function invalidItem(): never {

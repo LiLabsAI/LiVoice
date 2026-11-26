@@ -3,8 +3,8 @@ package com.aliahad.wovoice.dashboard
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
+import android.text.TextUtils
 import android.view.Gravity
-import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -15,6 +15,7 @@ import com.aliahad.wovoice.data.DictationRecord
 import com.aliahad.wovoice.data.DictionaryEntry
 import com.aliahad.wovoice.ui.dp
 import com.aliahad.wovoice.ui.rounded
+import com.aliahad.wovoice.ui.setButtonAccessibilityRole
 import com.aliahad.wovoice.ui.styleText
 import com.google.android.material.card.MaterialCardView
 import java.time.Instant
@@ -61,7 +62,7 @@ class HistoryAdapter(
     private class HeaderHolder(val label: TextView) : RecyclerView.ViewHolder(label)
 
     private class ItemHolder(
-        card: MaterialCardView,
+        private val card: MaterialCardView,
         private val onOpen: (DictationRecord) -> Unit,
         private val onCopy: (DictationRecord) -> Unit,
     ) : RecyclerView.ViewHolder(card) {
@@ -73,6 +74,7 @@ class HistoryAdapter(
         init {
             card.setOnClickListener { record?.let(onOpen) }
             copy.setOnClickListener { record?.let(onCopy) }
+            copy.setButtonAccessibilityRole()
         }
 
         fun bind(value: DictationRecord) {
@@ -82,7 +84,11 @@ class HistoryAdapter(
                 .atZone(runCatching { ZoneId.of(value.zoneId) }.getOrDefault(ZoneId.systemDefault()))
                 .format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT))
             val seconds = value.audioDurationMs / 1_000.0
-            metadata.text = "$time  •  ${value.wordCount} words  •  ${formatDuration(seconds)}"
+            val wordLabel = if (value.wordCount == 1) "1 word" else "${value.wordCount} words"
+            metadata.text = "$time  •  $wordLabel  •  ${formatDuration(seconds)}"
+            val snippet = value.finalText.take(60)
+            card.contentDescription = "Dictation from $time: $snippet. Open details"
+            copy.contentDescription = "Copy dictation from $time"
         }
     }
 
@@ -123,6 +129,8 @@ class DictionaryAdapter(
         init {
             primary.setOnClickListener { entry?.let(onPrimary) }
             delete.setOnClickListener { entry?.let(onDelete) }
+            primary.setButtonAccessibilityRole()
+            delete.setButtonAccessibilityRole()
         }
 
         fun bind(value: DictionaryEntry) {
@@ -135,6 +143,8 @@ class DictionaryAdapter(
             }
             primary.text = if (confirmed) "Edit" else "Accept"
             delete.text = if (confirmed) "Delete" else "Dismiss"
+            primary.contentDescription = if (confirmed) "Edit ${value.term}" else "Accept suggestion ${value.term}"
+            delete.contentDescription = if (confirmed) "Delete ${value.term}" else "Dismiss suggestion ${value.term}"
         }
     }
 
@@ -166,22 +176,33 @@ private fun createHistoryCard(context: Context): MaterialCardView = MaterialCard
             tag = "text"
             styleText(16f)
             maxLines = 4
+            ellipsize = TextUtils.TruncateAt.END
             setLineSpacing(0f, 1.12f)
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         addView(LinearLayout(context).apply {
             gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = context.dp(48)
             addView(TextView(context).apply {
                 tag = "metadata"
                 styleText(12.5f, MUTED)
-            }, LinearLayout.LayoutParams(0, context.dp(42), 1f).apply { gravity = Gravity.CENTER_VERTICAL })
+                minimumHeight = context.dp(40)
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                marginEnd = context.dp(8)
+            })
             addView(TextView(context).apply {
                 tag = "copy"
                 text = "Copy"
                 styleText(14f, ACCENT)
                 gravity = Gravity.CENTER
-                background = rounded(ACTION, context.dp(18).toFloat())
-            }, LinearLayout.LayoutParams(context.dp(68), context.dp(38)))
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(46)).apply { topMargin = context.dp(6) })
+                minWidth = context.dp(72)
+                minHeight = context.dp(48)
+                setPadding(context.dp(14), context.dp(8), context.dp(14), context.dp(8))
+                background = rounded(ACTION, context.dp(20).toFloat())
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = context.dp(6)
+        })
     })
 }
 
@@ -196,7 +217,7 @@ private fun createDictionaryCard(context: Context): MaterialCardView = MaterialC
     }
     addView(LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(context.dp(16), context.dp(14), context.dp(12), context.dp(10))
+        setPadding(context.dp(16), context.dp(14), context.dp(12), context.dp(12))
         addView(TextView(context).apply {
             tag = "term"
             styleText(17f)
@@ -209,19 +230,22 @@ private fun createDictionaryCard(context: Context): MaterialCardView = MaterialC
         })
         addView(LinearLayout(context).apply {
             gravity = Gravity.END
-            addView(action(context, "primary"), LinearLayout.LayoutParams(context.dp(82), context.dp(38)))
-            addView(action(context, "delete", destructive = true), LinearLayout.LayoutParams(context.dp(82), context.dp(38)).apply {
-                leftMargin = context.dp(8)
+            addView(action(context, "primary"), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(action(context, "delete", destructive = true), LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                marginStart = context.dp(8)
             })
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, context.dp(40)))
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     })
 }
 
 private fun action(context: Context, tagValue: String, destructive: Boolean = false) = TextView(context).apply {
     tag = tagValue
     gravity = Gravity.CENTER
+    minWidth = context.dp(84)
+    minHeight = context.dp(48)
+    setPadding(context.dp(14), context.dp(8), context.dp(14), context.dp(8))
     styleText(13.5f, if (destructive) DANGER else ACCENT)
-    background = rounded(ACTION, context.dp(18).toFloat())
+    background = rounded(ACTION, context.dp(20).toFloat())
 }
 
 private fun formatDuration(seconds: Double): String = when {

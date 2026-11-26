@@ -17,7 +17,7 @@ export const productionServices: Services = {
         NOVA_MODEL,
         {
           audio: content(),
-          language: options.locale,
+          ...(options.locale === "auto" ? { detect_language: true } : { language: options.locale }),
           punctuate: config.asr.nova.punctuate,
           smart_format: config.asr.nova.smartFormat,
           numerals: config.asr.nova.numerals,
@@ -33,12 +33,13 @@ export const productionServices: Services = {
       return { text, model: "nova-3" };
     }
 
+    const whisperLanguage = options.locale === "auto" ? undefined : options.locale.split("-")[0]?.toLowerCase();
     const response = await env.AI.run(
       WHISPER_MODEL,
       {
         audio: content(),
         task: "transcribe",
-        language: "en",
+        language: whisperLanguage,
         vad_filter: config.asr.whisper.vadFilter,
         beam_size: config.asr.whisper.beamSize,
         condition_on_previous_text: config.asr.whisper.conditionOnPreviousText,
@@ -49,7 +50,7 @@ export const productionServices: Services = {
       },
       { signal },
     );
-    const text = response.text.trim();
+    const text = response.text?.trim() ?? "";
     if (!text) throw new Error("ASR returned no text");
     return { text, model: "whisper-large-v3-turbo" };
   },
@@ -109,8 +110,16 @@ export function extractCleanedText(content: string): string | null {
   try {
     parsed = JSON.parse(unfenced);
   } catch {
-    // Plain prose is a usable candidate; broken JSON never is.
-    return /^[{["]/u.test(unfenced) ? null : unfenced;
+    // Plain prose (including normal quoted speech like `"Hello," she said.`) is
+    // usable; truncated JSON objects/arrays, key-value fragments, or unbalanced
+    // JSON strings are rejected.
+    if (/^[{[]/u.test(unfenced)) return null;
+    if (unfenced.startsWith('"')) {
+      if (/^"[^"]*"\s*:/u.test(unfenced)) return null;
+      const quoteCount = (unfenced.match(/(?<!\\)"/gu) ?? []).length;
+      if (quoteCount < 2 || quoteCount % 2 !== 0) return null;
+    }
+    return unfenced;
   }
   if (typeof parsed === "string") return parsed;
   if (!isRecord(parsed)) return null;

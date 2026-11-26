@@ -1,6 +1,6 @@
 import { ApiError } from "./errors";
 import { decryptString, encryptString, hmac, randomCode, randomToken, sha256, timingSafeEqual } from "./crypto";
-import { noStoreJson, readJson } from "./http";
+import { noStoreEmpty, noStoreJson, readJson } from "./http";
 import { BASE_DAILY_AUDIO_SECONDS } from "./limits";
 import {
   accountStatusValue,
@@ -93,6 +93,7 @@ export const productionAuthServices: AuthServices = {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body,
+      signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) return false;
     const result = (await response.json()) as { success?: boolean; hostname?: string; action?: string };
@@ -107,8 +108,9 @@ export const productionAuthServices: AuthServices = {
       && result.action === expectedAction;
   },
   async sendCode(env, email, code): Promise<void> {
+    const fromEmail = env.EMAIL_FROM?.trim() || "login@wovoice.aliahad.com";
     await env.EMAIL.send({
-      from: { email: "login@wovoice.aliahad.com", name: "LiVoice" },
+      from: { email: fromEmail, name: "LiVoice" },
       to: email,
       subject: `${code} is your LiVoice verification code`,
       text: `Your LiVoice verification code is ${code}. It expires in 10 minutes. If you did not request this code, you can ignore this email.`,
@@ -140,7 +142,18 @@ export async function handleAuthRoute(
     return refreshSession(request, env, requestId);
   }
   if (request.method === "POST" && url.pathname === "/v1/auth/logout") {
+    const clientIp = request.headers.get("cf-connecting-ip")?.trim() || "";
+    if (clientIp) {
+      const ipRate = await env.USER_API_RATE_LIMITER.limit({ key: `auth-logout-ip:${clientIp}` });
+      if (!ipRate.success) {
+        throw new ApiError(429, "RATE_LIMITED", true, "Too many requests. Please wait a moment.", 60);
+      }
+    }
     const principal = await authenticateAccess(request, env);
+    const userRate = await env.USER_API_RATE_LIMITER.limit({ key: `auth-logout:${principal.userId}` });
+    if (!userRate.success) {
+      throw new ApiError(429, "RATE_LIMITED", true, "Too many requests. Please wait a moment.", 60);
+    }
     await env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE id = ? AND user_id = ?")
       .bind(Date.now(), principal.sessionId, principal.userId)
       .run();
@@ -150,7 +163,7 @@ export async function handleAuthRoute(
       requestId,
       statusCode: 204,
     });
-    return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
+    return noStoreEmpty(204);
   }
   return null;
 }
@@ -179,6 +192,13 @@ async function startAuthentication(
     throw new ApiError(400, "INVALID_REQUEST", false, "Complete the security check and try again.");
   }
   const emailLookup = await hmac(env.AUTH_MASTER_KEY, `email:${email}`);
+  const clientIp = request.headers.get("cf-connecting-ip")?.trim() || "";
+  if (clientIp) {
+    const ipBurst = await env.AUTH_RATE_LIMITER.limit({ key: `auth-start-ip:${clientIp}` });
+    if (!ipBurst.success) {
+      throw new ApiError(429, "EMAIL_RATE_LIMITED", true, "Please wait before requesting another code.", 60);
+    }
+  }
   const burst = await env.AUTH_RATE_LIMITER.limit({ key: emailLookup });
   if (!burst.success) {
     throw new ApiError(429, "EMAIL_RATE_LIMITED", true, "Please wait before requesting another code.", 60);
@@ -186,7 +206,7 @@ async function startAuthentication(
   const validTurnstile = await services.verifyTurnstile(
     env,
     turnstileToken,
-    request.headers.get("cf-connecting-ip"),
+    clientIp || null,
     requestId,
     "account_auth",
   );
@@ -260,17 +280,23 @@ async function startAuthentication(
 }
 
 async function verifyCode(request: Request, env: AppEnv, requestId: string): Promise<Response> {
-  // Code guesses were unthrottled; the five-attempt cap bounds success, but every
-  // guess still cost D1 work. Bound the request rate per client address.
-  const clientAddress = request.headers.get("cf-connecting-ip") ?? "unknown";
-  const rate = await env.USER_API_RATE_LIMITER.limit({ key: `auth-verify:${clientAddress}` });
-  if (!rate.success) {
-    throw new ApiError(429, "RATE_LIMITED", true, "Too many attempts. Please wait a moment.", 60);
+  // Bound OTP guesses tightly without collapsing requests missing an IP header
+  // into a shared "unknown" bucket.
+  const clientIp = request.headers.get("cf-connecting-ip")?.trim() || "";
+  if (clientIp) {
+    const ipRate = await env.AUTH_RATE_LIMITER.limit({ key: `auth-verify-ip:${clientIp}` });
+    if (!ipRate.success) {
+      throw new ApiError(429, "RATE_LIMITED", true, "Too many attempts. Please wait a moment.", 60);
+    }
   }
   const body = await readJson<{ challengeId?: unknown; code?: unknown }>(request);
   const challengeId = typeof body.challengeId === "string" ? body.challengeId : "";
   const code = typeof body.code === "string" ? body.code.trim() : "";
   if (!challengeId || !/^\d{6}$/u.test(code)) invalidCode();
+  const challengeRate = await env.AUTH_RATE_LIMITER.limit({ key: `auth-verify:${challengeId}` });
+  if (!challengeRate.success) {
+    throw new ApiError(429, "RATE_LIMITED", true, "Too many attempts. Please wait a moment.", 60);
+  }
   const challenge = await env.DB.prepare("SELECT * FROM login_challenges WHERE id = ?")
     .bind(challengeId)
     .first<ChallengeRow>();
@@ -377,6 +403,13 @@ async function verifyCode(request: Request, env: AppEnv, requestId: string): Pro
 }
 
 async function exchangeCode(request: Request, env: AppEnv, requestId: string): Promise<Response> {
+  const clientIp = request.headers.get("cf-connecting-ip")?.trim() || "";
+  if (clientIp) {
+    const ipRate = await env.USER_API_RATE_LIMITER.limit({ key: `auth-token-ip:${clientIp}` });
+    if (!ipRate.success) {
+      throw new ApiError(429, "RATE_LIMITED", true, "Too many requests. Please wait a moment.", 60);
+    }
+  }
   const body = await readJson<{
     grantType?: unknown;
     code?: unknown;
@@ -393,6 +426,10 @@ async function exchangeCode(request: Request, env: AppEnv, requestId: string): P
     throw new ApiError(400, "INVALID_REQUEST", false, "The authorization grant is invalid.");
   }
   const codeHash = await hmac(env.AUTH_MASTER_KEY, `authorization:${code}`);
+  const codeRate = await env.AUTH_RATE_LIMITER.limit({ key: `auth-token:${codeHash}` });
+  if (!codeRate.success) {
+    throw new ApiError(429, "RATE_LIMITED", true, "Too many requests. Please wait a moment.", 60);
+  }
   const row = await env.DB.prepare("SELECT * FROM authorization_codes WHERE token_hash = ?")
     .bind(codeHash)
     .first<AuthorizationCodeRow>();
@@ -454,10 +491,21 @@ async function createSession(
 }
 
 async function refreshSession(request: Request, env: AppEnv, requestId: string): Promise<Response> {
+  const clientIp = request.headers.get("cf-connecting-ip")?.trim() || "";
+  if (clientIp) {
+    const ipRate = await env.USER_API_RATE_LIMITER.limit({ key: `auth-refresh-ip:${clientIp}` });
+    if (!ipRate.success) {
+      throw new ApiError(429, "RATE_LIMITED", true, "Too many requests. Please wait a moment.", 60);
+    }
+  }
   const body = await readJson<{ refreshToken?: unknown }>(request);
   const refreshToken = typeof body.refreshToken === "string" ? body.refreshToken : "";
   if (!refreshToken) throw new ApiError(401, "AUTH_REQUIRED", false, "Sign in to continue.");
   const refreshHash = await hmac(env.AUTH_MASTER_KEY, `refresh:${refreshToken}`);
+  const tokenRate = await env.USER_API_RATE_LIMITER.limit({ key: `auth-refresh:${refreshHash}` });
+  if (!tokenRate.success) {
+    throw new ApiError(429, "RATE_LIMITED", true, "Too many requests. Please wait a moment.", 60);
+  }
   const row = await env.DB.prepare(
     `SELECT r.id AS refresh_id, r.session_id, s.user_id, r.expires_at AS refresh_expires_at,
             r.used_at, s.revoked_at, s.absolute_expires_at
@@ -486,23 +534,32 @@ async function refreshSession(request: Request, env: AppEnv, requestId: string):
     hmac(env.AUTH_MASTER_KEY, `access:${accessToken}`),
     hmac(env.AUTH_MASTER_KEY, `refresh:${nextRefreshToken}`),
   ]);
+  let results: D1Result[];
   try {
-    await env.DB.batch([
+    results = await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE sessions SET access_hash = ?, access_expires_at = ?, last_seen_at = ? WHERE id = ? AND revoked_at IS NULL",
+      ).bind(accessHash, now + ACCESS_TOKEN_MS, now, row.session_id),
       env.DB.prepare("UPDATE refresh_tokens SET used_at = ?, replaced_by = ? WHERE id = ? AND used_at IS NULL")
         .bind(now, nextRefreshId, row.refresh_id),
       env.DB.prepare(
         `INSERT INTO refresh_tokens(id, session_id, token_hash, created_at, expires_at, parent_id)
          VALUES(?, ?, ?, ?, ?, ?)`,
       ).bind(nextRefreshId, row.session_id, nextRefreshHash, now, now + REFRESH_TOKEN_MS, row.refresh_id),
-      env.DB.prepare(
-        "UPDATE sessions SET access_hash = ?, access_expires_at = ?, last_seen_at = ? WHERE id = ? AND revoked_at IS NULL",
-      ).bind(accessHash, now + ACCESS_TOKEN_MS, now, row.session_id),
     ]);
   } catch {
     await env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL")
       .bind(now, row.session_id)
       .run();
     throw new ApiError(401, "AUTH_REQUIRED", false, "This session was revoked for security. Sign in again.");
+  }
+  if ((results[0]?.meta.changes ?? 0) !== 1 || (results[1]?.meta.changes ?? 0) !== 1) {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM refresh_tokens WHERE id = ?").bind(nextRefreshId),
+      env.DB.prepare("UPDATE sessions SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?")
+        .bind(now, row.session_id),
+    ]).catch(() => undefined);
+    throw new ApiError(401, "AUTH_REQUIRED", false, "Your session expired. Sign in again.");
   }
   return noStoreJson({
     requestId,
@@ -566,8 +623,17 @@ export async function handleAccountRoute(
               CASE WHEN id = ? THEN 1 ELSE 0 END AS current
        FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND absolute_expires_at > ?
        ORDER BY last_seen_at DESC`,
-    ).bind(principal.sessionId, principal.userId, Date.now()).all();
-    return noStoreJson({ requestId, sessions: result.results });
+    ).bind(principal.sessionId, principal.userId, Date.now()).all<{
+      id: string;
+      deviceName: string;
+      createdAt: number;
+      lastSeenAt: number;
+      current: number;
+    }>();
+    return noStoreJson({
+      requestId,
+      sessions: result.results.map((row) => ({ ...row, current: Boolean(row.current) })),
+    });
   }
   if (request.method === "DELETE" && url.pathname.startsWith("/v1/me/sessions/")) {
     await requireActiveAccount(env, principal);
@@ -576,6 +642,9 @@ export async function handleAccountRoute(
       sessionId = decodeURIComponent(url.pathname.slice("/v1/me/sessions/".length));
     } catch {
       throw new ApiError(400, "INVALID_REQUEST", false, "The session id is malformed.");
+    }
+    if (!sessionId || !/^[A-Za-z0-9._~-]{1,100}$/u.test(sessionId)) {
+      throw new ApiError(400, "INVALID_REQUEST", false, "The session id is invalid.");
     }
     await env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE id = ? AND user_id = ?")
       .bind(Date.now(), sessionId, principal.userId)
@@ -586,20 +655,73 @@ export async function handleAccountRoute(
       requestId,
       statusCode: 204,
     });
-    return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
+    return noStoreEmpty(204);
   }
   if (request.method === "DELETE" && url.pathname === "/v1/me") {
-    const body = await readJson<{ reauthToken?: unknown }>(request);
+    const body = await readJson<{ reauthToken?: unknown; codeVerifier?: unknown }>(request);
     const token = typeof body.reauthToken === "string" ? body.reauthToken : "";
+    const verifier = typeof body.codeVerifier === "string" ? body.codeVerifier : "";
+    if (!token) {
+      throw new ApiError(401, "AUTH_REQUIRED", false, "Verify your email again before deleting the account.");
+    }
     const tokenHash = await hmac(env.AUTH_MASTER_KEY, `authorization:${token}`);
     const authorization = await env.DB.prepare(
       "SELECT * FROM authorization_codes WHERE token_hash = ? AND user_id = ?",
     ).bind(tokenHash, principal.userId).first<AuthorizationCodeRow>();
-    if (!authorization || authorization.kind !== "delete" || authorization.used_at !== null || authorization.expires_at < Date.now()) {
+    const now = Date.now();
+    if (!authorization || authorization.kind !== "delete" || authorization.used_at !== null || authorization.expires_at < now) {
       throw new ApiError(401, "AUTH_REQUIRED", false, "Verify your email again before deleting the account.");
     }
-    await env.DB.prepare("DELETE FROM users WHERE id = ?").bind(principal.userId).run();
-    return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
+    if (authorization.code_challenge) {
+      if (!/^[A-Za-z0-9._~-]{43,128}$/u.test(verifier)) {
+        throw new ApiError(401, "AUTH_REQUIRED", false, "Verify your email again before deleting the account.");
+      }
+      const calculatedChallenge = await sha256(verifier);
+      if (!timingSafeEqual(calculatedChallenge, authorization.code_challenge)) {
+        throw new ApiError(401, "AUTH_REQUIRED", false, "Verify your email again before deleting the account.");
+      }
+    }
+    const [userRow, inFlight] = await Promise.all([
+      env.DB.prepare("SELECT email_lookup FROM users WHERE id = ?")
+        .bind(principal.userId)
+        .first<{ email_lookup: string }>(),
+      env.DB.prepare(
+        `SELECT date_key, SUM(reserved_neurons) AS reserved_neurons
+         FROM quota_reservations
+         WHERE user_id = ? AND status = 'reserved'
+         GROUP BY date_key`,
+      ).bind(principal.userId).all<{ date_key: string; reserved_neurons: number }>(),
+    ]);
+    const consumed = await env.DB.prepare(
+      "UPDATE authorization_codes SET used_at = ? WHERE id = ? AND used_at IS NULL",
+    ).bind(now, authorization.id).run();
+    if ((consumed.meta.changes ?? 0) !== 1) {
+      throw new ApiError(401, "AUTH_REQUIRED", false, "Verify your email again before deleting the account.");
+    }
+    const statements: D1PreparedStatement[] = [];
+    for (const row of inFlight.results) {
+      if (row.reserved_neurons > 0) {
+        statements.push(
+          env.DB.prepare(
+            `UPDATE global_daily_usage
+             SET reserved_neurons = MAX(0, reserved_neurons - COALESCE((
+               SELECT SUM(reserved_neurons) FROM quota_reservations
+               WHERE user_id = ? AND date_key = ? AND status = 'reserved'
+             ), 0))
+             WHERE date_key = ?`,
+          ).bind(principal.userId, row.date_key, row.date_key),
+        );
+      }
+    }
+    if (userRow?.email_lookup) {
+      statements.push(
+        env.DB.prepare("DELETE FROM login_challenges WHERE email_lookup = ?").bind(userRow.email_lookup),
+        env.DB.prepare("DELETE FROM admin_login_challenges WHERE email_lookup = ?").bind(userRow.email_lookup),
+      );
+    }
+    statements.push(env.DB.prepare("DELETE FROM users WHERE id = ?").bind(principal.userId));
+    await env.DB.batch(statements);
+    return noStoreEmpty(204);
   }
   return null;
 }
@@ -636,16 +758,20 @@ async function quotaSnapshot(env: AppEnv, userId: string): Promise<object> {
       "SELECT quota_limit_audio_seconds, quota_override_expires_at FROM users WHERE id = ?",
     ).bind(userId).first<Pick<UserRow, "quota_limit_audio_seconds" | "quota_override_expires_at">>(),
   ]);
+  const now = Date.now();
   const used = usage?.used_audio_seconds ?? 0;
   const reserved = usage?.reserved_audio_seconds ?? 0;
-  const limit = user ? effectiveDailyAudioLimit(user) : BASE_DAILY_AUDIO_SECONDS;
-  const resetAt = Date.parse(`${new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)}T00:00:00.000Z`);
+  const limit = user ? effectiveDailyAudioLimit(user, now) : BASE_DAILY_AUDIO_SECONDS;
+  const hasActiveOverride = user?.quota_limit_audio_seconds !== null
+    && user?.quota_override_expires_at !== null
+    && (user?.quota_override_expires_at ?? 0) > now;
+  const resetAt = Date.parse(`${new Date(now + 86_400_000).toISOString().slice(0, 10)}T00:00:00.000Z`);
   return {
     limitAudioSeconds: limit,
     usedAudioSeconds: used,
     reservedAudioSeconds: reserved,
     remainingAudioSeconds: Math.max(0, limit - used - reserved),
-    overrideExpiresAt: user?.quota_override_expires_at ?? null,
+    overrideExpiresAt: hasActiveOverride ? user!.quota_override_expires_at : null,
     resetAt,
   };
 }
@@ -667,9 +793,9 @@ function validateCodeChallenge(value: unknown): string {
 }
 
 function sanitizeDeviceName(value: unknown): string {
-  if (typeof value !== "string") return "Android device";
+  if (typeof value !== "string") return "Unknown device";
   const cleaned = value.replace(/[\u0000-\u001f\u007f]/gu, "").trim().slice(0, 80);
-  return cleaned || "Android device";
+  return cleaned || "Unknown device";
 }
 
 function invalidCode(): never {

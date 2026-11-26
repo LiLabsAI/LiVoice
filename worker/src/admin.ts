@@ -2,7 +2,7 @@ import { ApiError } from "./errors";
 import { handleAdminAiRoute } from "./admin-ai";
 import { productionServices } from "./models";
 import { base64Url, decryptString, fromBase64Url, hmac, randomCode, randomToken, timingSafeEqual } from "./crypto";
-import { noStoreJson, readJson } from "./http";
+import { noStoreEmpty, noStoreJson, readJson } from "./http";
 import { GLOBAL_DAILY_NEURON_LIMIT, MONTHLY_EMAIL_LIMIT } from "./limits";
 import {
   accountStatusValue,
@@ -94,12 +94,13 @@ interface AdminUserRow extends AccountControlRow {
 export const productionAdminServices: AdminServices = {
   async sendModerationEmail(env, message): Promise<void> {
     const supportEmail = env.SUPPORT_EMAIL?.trim() || "support@aliahad.com";
+    const fromEmail = env.EMAIL_FROM?.trim() || "login@wovoice.aliahad.com";
     const stateLabel = message.state === "active" ? "restored" : message.state;
     const until = message.effectiveUntil
       ? `<p><strong>Effective until:</strong> ${escapeHtml(new Date(message.effectiveUntil).toISOString())}</p>`
       : "";
     await env.EMAIL.send({
-      from: { email: "login@wovoice.aliahad.com", name: "LiVoice Accounts" },
+      from: { email: fromEmail, name: "LiVoice Accounts" },
       to: message.to,
       replyTo: supportEmail,
       subject: `Your LiVoice account access was ${stateLabel}`,
@@ -208,31 +209,31 @@ export async function handleAdminRoute(
 
   const activityMatch = apiPath.match(/^\/users\/([^/]+)\/activity$/u);
   if (request.method === "GET" && activityMatch) {
-    return userActivity(env, requestId, decodeURIComponent(activityMatch[1]), url.searchParams);
+    return userActivity(env, requestId, decodePathParam(activityMatch[1]), url.searchParams);
   }
   const detailMatch = apiPath.match(/^\/users\/([^/]+)$/u);
   if (request.method === "GET" && detailMatch) {
-    return userDetail(env, requestId, decodeURIComponent(detailMatch[1]));
+    return userDetail(env, requestId, decodePathParam(detailMatch[1]));
   }
   const statusMatch = apiPath.match(/^\/users\/([^/]+)\/status$/u);
   if (request.method === "POST" && statusMatch) {
-    return updateStatus(request, env, requestId, admin, decodeURIComponent(statusMatch[1]), services, ctx);
+    return updateStatus(request, env, requestId, admin, decodePathParam(statusMatch[1]), services, ctx);
   }
   const sessionsMatch = apiPath.match(/^\/users\/([^/]+)\/sessions\/revoke$/u);
   if (request.method === "POST" && sessionsMatch) {
-    return revokeSessions(request, env, requestId, admin, decodeURIComponent(sessionsMatch[1]));
+    return revokeSessions(request, env, requestId, admin, decodePathParam(sessionsMatch[1]));
   }
   const quotaMatch = apiPath.match(/^\/users\/([^/]+)\/quota-override$/u);
   if (request.method === "PUT" && quotaMatch) {
-    return setQuotaOverride(request, env, requestId, admin, decodeURIComponent(quotaMatch[1]));
+    return setQuotaOverride(request, env, requestId, admin, decodePathParam(quotaMatch[1]));
   }
   const clearQuotaMatch = apiPath.match(/^\/users\/([^/]+)\/quota-override\/clear$/u);
   if (request.method === "POST" && clearQuotaMatch) {
-    return clearQuotaOverride(request, env, requestId, admin, decodeURIComponent(clearQuotaMatch[1]));
+    return clearQuotaOverride(request, env, requestId, admin, decodePathParam(clearQuotaMatch[1]));
   }
   const retryMatch = apiPath.match(/^\/notifications\/([^/]+)\/retry$/u);
   if (request.method === "POST" && retryMatch) {
-    return retryNotification(request, env, requestId, admin, decodeURIComponent(retryMatch[1]), services, ctx);
+    return retryNotification(request, env, requestId, admin, decodePathParam(retryMatch[1]), services, ctx);
   }
   throw new ApiError(404, "NOT_FOUND", false, "This admin endpoint does not exist.");
 }
@@ -318,14 +319,27 @@ async function startAdminAuthentication(
     throw new ApiError(400, "INVALID_REQUEST", false, "Complete the security check and try again.");
   }
   const emailLookup = await hmac(env.AUTH_MASTER_KEY, `email:${email}`);
-  const burst = await env.AUTH_RATE_LIMITER.limit({ key: `admin:${emailLookup}` });
+  const clientIp = request.headers.get("cf-connecting-ip")?.trim() || "";
+  if (clientIp) {
+    const ipBurst = await env.AUTH_RATE_LIMITER.limit({ key: `admin-ip:${clientIp}` });
+    if (!ipBurst.success) {
+      throw new ApiError(429, "EMAIL_RATE_LIMITED", true, "Please wait before requesting another code.", 60);
+    }
+  }
+  const burst = await env.AUTH_RATE_LIMITER.limit({
+    key: clientIp ? `admin:${clientIp}:${emailLookup}` : `admin:${emailLookup}`,
+  });
   if (!burst.success) {
+    throw new ApiError(429, "EMAIL_RATE_LIMITED", true, "Please wait before requesting another code.", 60);
+  }
+  const emailBurst = clientIp ? await env.AUTH_RATE_LIMITER.limit({ key: `admin:${emailLookup}` }) : burst;
+  if (!emailBurst.success) {
     throw new ApiError(429, "EMAIL_RATE_LIMITED", true, "Please wait before requesting another code.", 60);
   }
   const validTurnstile = await authServices.verifyTurnstile(
     env,
     turnstileToken,
-    request.headers.get("cf-connecting-ip"),
+    clientIp || null,
     requestId,
     "admin_login",
   );
@@ -369,8 +383,9 @@ async function startAdminAuthentication(
 
   if (eligibleUserId) {
     const monthKey = new Date(now).toISOString().slice(0, 7);
+    let results: D1Result[];
     try {
-      const results = await env.DB.batch([
+      results = await env.DB.batch([
         env.DB.prepare(
           "INSERT OR IGNORE INTO service_monthly_usage(month_key, verification_emails) VALUES(?, 0)",
         ).bind(monthKey),
@@ -378,7 +393,24 @@ async function startAdminAuthentication(
           "UPDATE service_monthly_usage SET verification_emails = verification_emails + 1 WHERE month_key = ?",
         ).bind(monthKey),
       ]);
-      if ((results[1]?.meta.changes ?? 0) !== 1) throw new Error("EMAIL_RATE_LIMITED");
+    } catch (error) {
+      await env.DB.prepare("DELETE FROM admin_login_challenges WHERE id = ?").bind(challengeId).run().catch(() => undefined);
+      if (error instanceof Error && error.message.includes("EMAIL_RATE_LIMITED")) {
+        throw new ApiError(503, "EMAIL_RATE_LIMITED", true, "LiVoice has reached its monthly verification limit.", 3_600);
+      }
+      console.error(JSON.stringify({
+        event: "admin_verification_budget_failed",
+        requestId,
+        reason: safeInfrastructureError(error),
+      }));
+      throw new ApiError(503, "EMAIL_SEND_FAILED", true, "The verification email could not be sent. Please try again.");
+    }
+    if ((results[1]?.meta.changes ?? 0) !== 1) {
+      await env.DB.prepare("DELETE FROM admin_login_challenges WHERE id = ?").bind(challengeId).run().catch(() => undefined);
+      throw new ApiError(503, "EMAIL_RATE_LIMITED", true, "LiVoice has reached its monthly verification limit.", 3_600);
+    }
+
+    try {
       await authServices.sendCode(env, email, code);
     } catch (error) {
       await env.DB.batch([
@@ -386,7 +418,7 @@ async function startAdminAuthentication(
         env.DB.prepare(
           "UPDATE service_monthly_usage SET verification_emails = MAX(0, verification_emails - 1) WHERE month_key = ?",
         ).bind(monthKey),
-      ]);
+      ]).catch(() => undefined);
       console.error(JSON.stringify({
         event: "admin_verification_email_failed",
         requestId,
@@ -401,10 +433,21 @@ async function startAdminAuthentication(
 
 async function verifyAdminCode(request: Request, env: AppEnv, requestId: string): Promise<Response> {
   requireBrowserRequest(request, env);
+  const clientIp = request.headers.get("cf-connecting-ip")?.trim() || "";
+  if (clientIp) {
+    const ipRate = await env.AUTH_RATE_LIMITER.limit({ key: `admin-verify-ip:${clientIp}` });
+    if (!ipRate.success) {
+      throw new ApiError(429, "RATE_LIMITED", true, "Too many attempts. Please wait a moment.", 60);
+    }
+  }
   const body = await readJson<{ challengeId?: unknown; code?: unknown }>(request);
   const challengeId = typeof body.challengeId === "string" ? body.challengeId : "";
   const code = typeof body.code === "string" ? body.code.trim() : "";
   if (!challengeId || !/^\d{6}$/u.test(code)) invalidAdminCode();
+  const challengeRate = await env.AUTH_RATE_LIMITER.limit({ key: `admin-verify:${challengeId}` });
+  if (!challengeRate.success) {
+    throw new ApiError(429, "RATE_LIMITED", true, "Too many attempts. Please wait a moment.", 60);
+  }
   const challenge = await env.DB.prepare(
     `SELECT id, user_id, code_hash, attempts, expires_at, consumed_at
      FROM admin_login_challenges WHERE id = ?`,
@@ -517,7 +560,7 @@ async function logoutAdmin(env: AppEnv, requestId: string, admin: AdminPrincipal
       now,
     ),
   ]);
-  const response = new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
+  const response = noStoreEmpty(204);
   response.headers.append("Set-Cookie", clearCookie(ADMIN_SESSION_COOKIE, true));
   response.headers.append("Set-Cookie", clearCookie(ADMIN_CSRF_COOKIE, false));
   return response;
@@ -684,6 +727,10 @@ async function userDetail(env: AppEnv, requestId: string, userId: string): Promi
     ).bind(userId).all(),
   ]);
   const email = await decryptString(env.PII_KEY, user.email_ciphertext, user.email_nonce);
+  const now = Date.now();
+  const hasActiveOverride = user.quota_limit_audio_seconds !== null
+    && user.quota_override_expires_at !== null
+    && user.quota_override_expires_at > now;
   return noStoreJson({
     requestId,
     user: {
@@ -696,9 +743,9 @@ async function userDetail(env: AppEnv, requestId: string, userId: string): Promi
       lastActivityAt: user.last_activity_at,
       termsVersion: user.terms_version,
       quota: {
-        limitAudioSeconds: effectiveDailyAudioLimit(user),
-        overrideLimitAudioSeconds: user.quota_limit_audio_seconds,
-        overrideExpiresAt: user.quota_override_expires_at,
+        limitAudioSeconds: effectiveDailyAudioLimit(user, now),
+        overrideLimitAudioSeconds: hasActiveOverride ? user.quota_limit_audio_seconds : null,
+        overrideExpiresAt: hasActiveOverride ? user.quota_override_expires_at : null,
         todayUsedAudioSeconds: usage?.todayAudioSeconds ?? 0,
       },
       usage90d: {
@@ -809,9 +856,6 @@ async function updateStatus(
   if (status !== "active" && status !== "suspended" && status !== "banned") {
     throw new ApiError(400, "INVALID_STATUS_TRANSITION", false, "Choose active, suspended, or banned.");
   }
-  if (target.status === status && !(status === "suspended" && target.suspended_until !== body.suspendedUntil)) {
-    throw new ApiError(409, "INVALID_STATUS_TRANSITION", false, "The account already has that status.");
-  }
   const now = Date.now();
   let suspendedUntil: number | null = null;
   if (status === "suspended") {
@@ -820,17 +864,23 @@ async function updateStatus(
       throw new ApiError(400, "INVALID_STATUS_TRANSITION", false, "Suspensions must end within the next 180 days.");
     }
   }
+  if (target.status === status && !(status === "suspended" && target.suspended_until !== suspendedUntil)) {
+    throw new ApiError(409, "INVALID_STATUS_TRANSITION", false, "The account already has that status.");
+  }
   const internalReason = requiredText(body.internalReason, 5, 500, "Enter an internal reason.");
   const publicMessage = publicStatusMessage(status, body.publicMessage);
   const action = status === "active" ? "user_restored" : status === "suspended" ? "user_suspended" : "user_banned";
   const before = { status: target.status, suspendedUntil: target.suspended_until, publicMessage: target.public_status_message };
   const after = { status, suspendedUntil, publicMessage: status === "active" ? null : publicMessage };
   const notificationId = crypto.randomUUID();
+  const updated = await env.DB.prepare(
+    `UPDATE users SET status = ?, suspended_until = ?, public_status_message = ?, status_changed_at = ?
+     WHERE id = ? AND role != 'admin' AND status = ? AND suspended_until IS ?`,
+  ).bind(status, suspendedUntil, status === "active" ? null : publicMessage, now, userId, target.status, target.suspended_until).run();
+  if ((updated.meta.changes ?? 0) !== 1) {
+    throw new ApiError(409, "INVALID_STATUS_TRANSITION", false, "The account status changed concurrently. Reload and try again.");
+  }
   await env.DB.batch([
-    env.DB.prepare(
-      `UPDATE users SET status = ?, suspended_until = ?, public_status_message = ?, status_changed_at = ?
-       WHERE id = ? AND role != 'admin'`,
-    ).bind(status, suspendedUntil, status === "active" ? null : publicMessage, now, userId),
     env.DB.prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
       .bind(now, userId),
     env.DB.prepare(
@@ -913,12 +963,13 @@ async function setQuotaOverride(
   const reason = requiredText(body.internalReason, 5, 500, "Enter an internal reason.");
   const before = { limitAudioSeconds: target.quota_limit_audio_seconds, expiresAt: target.quota_override_expires_at };
   const after = { limitAudioSeconds: limit, expiresAt };
-  await env.DB.batch([
-    env.DB.prepare(
-      "UPDATE users SET quota_limit_audio_seconds = ?, quota_override_expires_at = ? WHERE id = ? AND role != 'admin'",
-    ).bind(limit, expiresAt, userId),
-    auditStatement(env, admin.userId, userId, "quota_override_set", reason, before, after, requestId, now),
-  ]);
+  const updated = await env.DB.prepare(
+    "UPDATE users SET quota_limit_audio_seconds = ?, quota_override_expires_at = ? WHERE id = ? AND role != 'admin'",
+  ).bind(limit, expiresAt, userId).run();
+  if ((updated.meta.changes ?? 0) !== 1) {
+    throw new ApiError(409, "INVALID_STATUS_TRANSITION", false, "The account could not be updated.");
+  }
+  await auditStatement(env, admin.userId, userId, "quota_override_set", reason, before, after, requestId, now).run();
   return noStoreJson({ requestId, userId, quotaOverride: after });
 }
 
@@ -934,12 +985,13 @@ async function clearQuotaOverride(
   const reason = requiredText(body.internalReason, 5, 500, "Enter an internal reason.");
   const before = { limitAudioSeconds: target.quota_limit_audio_seconds, expiresAt: target.quota_override_expires_at };
   const now = Date.now();
-  await env.DB.batch([
-    env.DB.prepare(
-      "UPDATE users SET quota_limit_audio_seconds = NULL, quota_override_expires_at = NULL WHERE id = ? AND role != 'admin'",
-    ).bind(userId),
-    auditStatement(env, admin.userId, userId, "quota_override_cleared", reason, before, null, requestId, now),
-  ]);
+  const updated = await env.DB.prepare(
+    "UPDATE users SET quota_limit_audio_seconds = NULL, quota_override_expires_at = NULL WHERE id = ? AND role != 'admin'",
+  ).bind(userId).run();
+  if ((updated.meta.changes ?? 0) !== 1) {
+    throw new ApiError(409, "INVALID_STATUS_TRANSITION", false, "The account could not be updated.");
+  }
+  await auditStatement(env, admin.userId, userId, "quota_override_cleared", reason, before, null, requestId, now).run();
   return noStoreJson({ requestId, userId, quotaOverride: null });
 }
 
@@ -960,15 +1012,16 @@ async function retryNotification(
   if (!row) throw new ApiError(404, "NOT_FOUND", false, "The notification does not exist.");
   if (row.status !== "failed") throw new ApiError(409, "INVALID_REQUEST", false, "Only failed notices can be retried.");
   const now = Date.now();
-  await env.DB.batch([
-    env.DB.prepare(
-      "UPDATE moderation_notifications SET status = 'pending', attempts = 0, next_attempt_at = ?, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'failed'",
-    ).bind(now, now, notificationId),
-    auditStatement(
-      env, admin.userId, row.user_id, "moderation_notice_retried", reason,
-      { notificationId, status: "failed" }, { notificationId, status: "pending" }, requestId, now,
-    ),
-  ]);
+  const updated = await env.DB.prepare(
+    "UPDATE moderation_notifications SET status = 'pending', attempts = 0, next_attempt_at = ?, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'failed'",
+  ).bind(now, now, notificationId).run();
+  if ((updated.meta.changes ?? 0) !== 1) {
+    throw new ApiError(409, "INVALID_REQUEST", false, "Only failed notices can be retried.");
+  }
+  await auditStatement(
+    env, admin.userId, row.user_id, "moderation_notice_retried", reason,
+    { notificationId, status: "failed" }, { notificationId, status: "pending" }, requestId, now,
+  ).run();
   await defer(ctx, processModerationNotifications(env, services, 1));
   return noStoreJson({ requestId, notificationId, status: "pending" });
 }
@@ -1048,7 +1101,9 @@ async function medianLatency(env: AppEnv, startMs: number): Promise<number | nul
 }
 
 function requireBrowserRequest(request: Request, env: AppEnv): void {
-  if (request.headers.get("origin") !== env.APP_ORIGIN || request.headers.get("sec-fetch-site") !== "same-origin") {
+  const origin = request.headers.get("origin");
+  const fetchSite = request.headers.get("sec-fetch-site");
+  if (origin !== env.APP_ORIGIN || (fetchSite !== null && fetchSite !== "same-origin")) {
     throw new ApiError(403, "ADMIN_REQUIRED", false, "The admin request origin is invalid.");
   }
 }
@@ -1177,11 +1232,20 @@ function safeAdminReturn(value: string | null): string {
   if (!value || (!value.startsWith("/admin") || value.startsWith("//"))) return "/admin/";
   try {
     const parsed = new URL(value, "https://wovoice.invalid");
-    return parsed.origin === "https://wovoice.invalid" && parsed.pathname.startsWith("/admin")
+    const validPath = parsed.pathname === "/admin" || parsed.pathname.startsWith("/admin/");
+    return parsed.origin === "https://wovoice.invalid" && validPath
       ? `${parsed.pathname}${parsed.search}${parsed.hash}`
       : "/admin/";
   } catch {
     return "/admin/";
+  }
+}
+
+function decodePathParam(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new ApiError(400, "INVALID_REQUEST", false, "The request path parameter is malformed.");
   }
 }
 

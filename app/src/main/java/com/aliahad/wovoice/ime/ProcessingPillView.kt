@@ -13,6 +13,8 @@ import android.os.SystemClock
 import android.util.TypedValue
 import android.view.View
 import com.aliahad.wovoice.ui.dp
+import com.aliahad.wovoice.ui.systemAnimationsEnabled
+import kotlin.math.ceil
 
 class ProcessingPillView(context: Context) : View(context) {
     private val bounds = RectF()
@@ -21,7 +23,7 @@ class ProcessingPillView(context: Context) : View(context) {
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.rgb(91, 91, 96)
         textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 18f, context.resources.displayMetrics)
-        textAlign = Paint.Align.CENTER
+        textAlign = Paint.Align.LEFT
         typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
     }
     private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(91, 91, 96) }
@@ -29,7 +31,13 @@ class ProcessingPillView(context: Context) : View(context) {
     private val shimmerMatrix = Matrix()
     private var shimmerShader: LinearGradient? = null
     private var active = false
+    private var animationsEnabled = true
     private var startedAt = 0L
+
+    fun setAnimationsEnabled(enabled: Boolean) {
+        animationsEnabled = enabled
+        invalidate()
+    }
 
     fun setActive(value: Boolean) {
         if (active == value) return
@@ -38,6 +46,22 @@ class ProcessingPillView(context: Context) : View(context) {
             startedAt = SystemClock.uptimeMillis()
             invalidate()
         }
+    }
+
+    private fun motionAllowed(): Boolean = animationsEnabled && context.systemAnimationsEnabled()
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val textWidth = textPaint.measureText(LABEL)
+        val dotsWidth = context.dp(24)
+        val horizontalPadding = context.dp(44)
+        val desiredWidth = maxOf(context.dp(172), ceil(textWidth + dotsWidth + horizontalPadding).toInt())
+        val metrics = textPaint.fontMetrics
+        val textHeight = metrics.descent - metrics.ascent
+        val desiredHeight = maxOf(context.dp(56), ceil(textHeight + context.dp(24)).toInt())
+        setMeasuredDimension(
+            resolveSize(desiredWidth, widthMeasureSpec),
+            resolveSize(desiredHeight, heightMeasureSpec),
+        )
     }
 
     override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
@@ -59,10 +83,11 @@ class ProcessingPillView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        val motion = active && motionAllowed()
         val radius = height / 2f
         canvas.drawRoundRect(bounds, radius, radius, backgroundPaint)
 
-        if (active) {
+        if (motion) {
             val progress = ((SystemClock.uptimeMillis() - startedAt) % SHIMMER_DURATION_MS) / SHIMMER_DURATION_MS.toFloat()
             val center = -width * 0.55f + progress * width * 2.1f
             shimmerMatrix.setTranslate(center, 0f)
@@ -75,23 +100,37 @@ class ProcessingPillView(context: Context) : View(context) {
 
         val metrics = textPaint.fontMetrics
         val baseline = height / 2f - (metrics.ascent + metrics.descent) / 2f
-        canvas.drawText("Thinking", width / 2f - context.dp(8), baseline, textPaint)
+        val textWidth = textPaint.measureText(LABEL)
+        val dotGap = context.dp(6).toFloat()
+        val dotRadius = context.dp(1).toFloat().coerceAtLeast(3f)
+        val dotsSpan = dotGap * 2f + dotRadius * 2f
+        val totalContentWidth = textWidth + context.dp(8) + dotsSpan
+        val textStartX = ((width - totalContentWidth) / 2f).coerceAtLeast(context.dp(14).toFloat())
+        canvas.drawText(LABEL, textStartX, baseline, textPaint)
+
+        val dotsStartX = textStartX + textWidth + context.dp(8) + dotRadius
+        val dotY = baseline - dotRadius
         val elapsed = (SystemClock.uptimeMillis() - startedAt).coerceAtLeast(0L)
         repeat(3) { index ->
-            val phase = ((elapsed - index * 150L) % 900L).coerceAtLeast(0L) / 900f
-            dotPaint.alpha = (75 + 180 * (1f - kotlin.math.abs(phase * 2f - 1f))).toInt()
-            canvas.drawCircle(
-                width / 2f + context.dp(35 + index * 6).toFloat(),
-                height / 2f + context.dp(5),
-                context.dp(1).toFloat().coerceAtLeast(3f),
-                dotPaint,
-            )
+            dotPaint.alpha = if (motion) {
+                val phase = ((elapsed - index * 150L) % 900L).coerceAtLeast(0L) / 900f
+                (75 + 180 * (1f - kotlin.math.abs(phase * 2f - 1f))).toInt()
+            } else {
+                200
+            }
+            canvas.drawCircle(dotsStartX + index * dotGap, dotY, dotRadius, dotPaint)
         }
         dotPaint.alpha = 255
-        if (active) postInvalidateDelayed(FRAME_DELAY_MS)
+        if (motion && isAttachedToWindow) postInvalidateDelayed(FRAME_DELAY_MS)
+    }
+
+    override fun onDetachedFromWindow() {
+        active = false
+        super.onDetachedFromWindow()
     }
 
     private companion object {
+        const val LABEL = "Thinking"
         const val FRAME_DELAY_MS = 33L
         const val SHIMMER_DURATION_MS = 1_500L
     }

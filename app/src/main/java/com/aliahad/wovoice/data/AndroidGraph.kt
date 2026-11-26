@@ -65,12 +65,22 @@ object AndroidGraph {
         }
     }
 
+    private val MIGRATION_2_3 = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_dictation_records_ownerAccountId_createdAtMs ON dictation_records(ownerAccountId, createdAtMs)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_dictation_records_ownerAccountId_syncId ON dictation_records(ownerAccountId, syncId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_dictation_records_ownerAccountId_syncState ON dictation_records(ownerAccountId, syncState)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_daily_usage_ownerAccountId_lastEventAtMs ON daily_usage(ownerAccountId, lastEventAtMs)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_dictionary_entries_ownerAccountId_syncId ON dictionary_entries(ownerAccountId, syncId)")
+        }
+    }
+
     fun database(context: Context): WoVoiceDatabase = database ?: synchronized(this) {
         database ?: Room.databaseBuilder(
             context.applicationContext,
             WoVoiceDatabase::class.java,
             WoVoiceDatabase.DB_NAME,
-        ).addMigrations(MIGRATION_1_2).build().also { database = it }
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { database = it }
     }
 
     fun repository(context: Context): WoVoiceRepository {

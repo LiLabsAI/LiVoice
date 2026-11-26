@@ -100,6 +100,9 @@ abstract class WoVoiceDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     abstract suspend fun upsertOutbox(value: EncryptedSyncOutboxItem): Long
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    abstract suspend fun upsertOutboxAll(values: List<EncryptedSyncOutboxItem>)
+
     @Query("SELECT * FROM encrypted_sync_outbox WHERE ownerAccountId = :ownerAccountId ORDER BY createdAtMs LIMIT :limit")
     abstract suspend fun outbox(ownerAccountId: String, limit: Int): List<EncryptedSyncOutboxItem>
 
@@ -109,7 +112,7 @@ abstract class WoVoiceDao {
     @Query("DELETE FROM encrypted_sync_outbox WHERE ownerAccountId = :ownerAccountId AND recordType = :type AND recordId = :recordId")
     abstract suspend fun deleteOutboxRecord(ownerAccountId: String, type: String, recordId: String)
 
-    @Query("SELECT * FROM dictation_records WHERE ownerAccountId = :ownerAccountId AND syncState = 'local' LIMIT :limit")
+    @Query("SELECT * FROM dictation_records WHERE ownerAccountId = :ownerAccountId AND syncState = 'local' AND syncId != '' LIMIT :limit")
     abstract suspend fun unsyncedHistory(ownerAccountId: String, limit: Int): List<DictationRecord>
 
     @Query("SELECT * FROM dictation_records WHERE ownerAccountId = :ownerAccountId AND syncId = :syncId LIMIT 1")
@@ -118,8 +121,11 @@ abstract class WoVoiceDao {
     @Query("DELETE FROM dictation_records WHERE ownerAccountId = :ownerAccountId AND syncId = :syncId")
     abstract suspend fun deleteHistoryBySyncId(ownerAccountId: String, syncId: String)
 
-    @Query("SELECT * FROM dictionary_entries WHERE ownerAccountId = :ownerAccountId AND status = 'confirmed' AND syncState = 'local' LIMIT :limit")
+    @Query("SELECT * FROM dictionary_entries WHERE ownerAccountId = :ownerAccountId AND status = 'confirmed' AND syncState = 'local' AND syncId != '' LIMIT :limit")
     abstract suspend fun unsyncedDictionary(ownerAccountId: String, limit: Int): List<DictionaryEntry>
+
+    @Query("SELECT * FROM dictionary_entries WHERE ownerAccountId = :ownerAccountId AND status = 'confirmed' AND syncState = 'local' AND syncId != '' AND syncVersion > 0 LIMIT :limit")
+    abstract suspend fun unsyncedExistingDictionary(ownerAccountId: String, limit: Int): List<DictionaryEntry>
 
     @Query("SELECT * FROM dictionary_entries WHERE ownerAccountId = :ownerAccountId AND syncId = :syncId LIMIT 1")
     abstract suspend fun dictionaryBySyncId(ownerAccountId: String, syncId: String): DictionaryEntry?
@@ -127,7 +133,7 @@ abstract class WoVoiceDao {
     @Query("DELETE FROM dictionary_entries WHERE ownerAccountId = :ownerAccountId AND syncId = :syncId")
     abstract suspend fun deleteDictionaryBySyncId(ownerAccountId: String, syncId: String)
 
-    @Query("SELECT * FROM analytics_sync_events WHERE ownerAccountId = :ownerAccountId AND syncState = 'local' LIMIT :limit")
+    @Query("SELECT * FROM analytics_sync_events WHERE ownerAccountId = :ownerAccountId AND syncState = 'local' AND syncId != '' LIMIT :limit")
     abstract suspend fun unsyncedAnalytics(ownerAccountId: String, limit: Int): List<AnalyticsSyncEvent>
 
     @Query("SELECT * FROM analytics_sync_events WHERE ownerAccountId = :ownerAccountId AND syncId = :syncId LIMIT 1")
@@ -170,18 +176,174 @@ abstract class WoVoiceDao {
     @Transaction
     open suspend fun assignUnassigned(ownerAccountId: String) {
         assignHistory(ownerAccountId)
-        assignUsage(ownerAccountId)
+        migrateUnassignedUsage(ownerAccountId)
+        deduplicateUnassignedDictionary(ownerAccountId)
         assignDictionary(ownerAccountId)
+    }
+
+    @Query("SELECT * FROM daily_usage WHERE ownerAccountId IS NULL")
+    protected abstract suspend fun unassignedUsage(): List<DailyUsageAggregate>
+
+    @Query("SELECT * FROM dictionary_entries WHERE ownerAccountId IS NULL")
+    protected abstract suspend fun unassignedDictionary(): List<DictionaryEntry>
+
+    private suspend fun migrateUnassignedUsage(ownerAccountId: String) {
+        unassignedUsage().forEach { legacy ->
+            val targetKey = "$ownerAccountId|${legacy.localDate}|${legacy.zoneId}"
+            val existing = dailyUsage(targetKey, ownerAccountId)
+            deleteUsage(legacy.dateKey)
+            if (existing == null) {
+                upsertUsage(legacy.copy(dateKey = targetKey, ownerAccountId = ownerAccountId))
+            } else {
+                val samples = (
+                    existing.processingSamplesMs.split(',').filter(String::isNotBlank) +
+                        legacy.processingSamplesMs.split(',').filter(String::isNotBlank)
+                    ).takeLast(MAX_DAILY_SAMPLES).joinToString(",")
+                upsertUsage(
+                    existing.copy(
+                        firstEventAtMs = minOf(existing.firstEventAtMs, legacy.firstEventAtMs),
+                        lastEventAtMs = maxOf(existing.lastEventAtMs, legacy.lastEventAtMs),
+                        dictationCount = existing.dictationCount + legacy.dictationCount,
+                        audioDurationMs = existing.audioDurationMs + legacy.audioDurationMs,
+                        wordCount = existing.wordCount + legacy.wordCount,
+                        processingTotalMs = existing.processingTotalMs + legacy.processingTotalMs,
+                        processingSamplesMs = samples,
+                        polishedCount = existing.polishedCount + legacy.polishedCount,
+                        correctionCount = existing.correctionCount + legacy.correctionCount,
+                        asrNeurons = existing.asrNeurons + legacy.asrNeurons,
+                        polishNeurons = existing.polishNeurons + legacy.polishNeurons,
+                        totalNeurons = existing.totalNeurons + legacy.totalNeurons,
+                        estimatedCostUsd = existing.estimatedCostUsd + legacy.estimatedCostUsd,
+                    ),
+                )
+            }
+        }
+    }
+
+    private suspend fun deduplicateUnassignedDictionary(ownerAccountId: String) {
+        unassignedDictionary().groupBy { it.normalizedTerm }.forEach { (normalized, entries) ->
+            if (dictionaryByNormalized(ownerAccountId, normalized) != null) {
+                entries.forEach { deleteDictionary(it) }
+            } else if (entries.size > 1) {
+                val winner = entries.sortedWith(
+                    compareByDescending<DictionaryEntry> { it.isConfirmed }
+                        .thenByDescending { it.useCount }
+                        .thenByDescending { it.lastUsedAtMs }
+                        .thenBy { it.id },
+                ).first()
+                entries.forEach { entry ->
+                    if (entry.id != winner.id) deleteDictionary(entry)
+                }
+            }
+        }
     }
 
     @Query("UPDATE dictation_records SET ownerAccountId = :ownerAccountId, syncId = CASE WHEN syncId = '' THEN requestId ELSE syncId END, syncState = 'local' WHERE ownerAccountId IS NULL")
     protected abstract suspend fun assignHistory(ownerAccountId: String)
 
-    @Query("UPDATE daily_usage SET ownerAccountId = :ownerAccountId WHERE ownerAccountId IS NULL")
-    protected abstract suspend fun assignUsage(ownerAccountId: String)
-
     @Query("UPDATE dictionary_entries SET ownerAccountId = :ownerAccountId, syncId = CASE WHEN syncId = '' THEN lower(hex(randomblob(16))) ELSE syncId END, syncState = 'local' WHERE ownerAccountId IS NULL")
     protected abstract suspend fun assignDictionary(ownerAccountId: String)
+
+    @Transaction
+    open suspend fun deleteHistoryWithTombstone(record: DictationRecord, tombstone: EncryptedSyncOutboxItem?) {
+        if (tombstone != null) upsertOutbox(tombstone)
+        deleteRecord(record)
+    }
+
+    @Transaction
+    open suspend fun restoreHistoryClearingTombstone(record: DictationRecord) {
+        restoreRecord(record)
+        record.ownerAccountId?.takeIf(String::isNotBlank)?.let {
+            deleteOutboxRecord(it, "history", record.syncId)
+        }
+    }
+
+    @Transaction
+    open suspend fun deleteDictionaryWithTombstone(entry: DictionaryEntry, tombstone: EncryptedSyncOutboxItem?) {
+        if (tombstone != null) upsertOutbox(tombstone)
+        deleteDictionary(entry)
+    }
+
+    @Transaction
+    open suspend fun clearHistoryWithTombstones(ownerAccountId: String?, nowMs: Long) {
+        if (!ownerAccountId.isNullOrBlank()) {
+            val tombstones = history(ownerAccountId, "")
+                .filter { it.syncId.isNotBlank() }
+                .map { record ->
+                    EncryptedSyncOutboxItem(
+                        ownerAccountId = ownerAccountId,
+                        recordType = "history",
+                        recordId = record.syncId,
+                        baseVersion = record.syncVersion,
+                        keyVersion = 1,
+                        nonce = "",
+                        ciphertext = "",
+                        deleted = true,
+                        createdAtMs = nowMs,
+                    )
+                }
+            if (tombstones.isNotEmpty()) upsertOutboxAll(tombstones)
+        }
+        clearHistory(ownerAccountId)
+    }
+
+    @Transaction
+    open suspend fun clearDictionaryWithTombstones(ownerAccountId: String?, nowMs: Long) {
+        if (!ownerAccountId.isNullOrBlank()) {
+            // Only confirmed dictionary entries are synced to the cloud; suggested
+            // entries stay local and must never emit cloud deletion tombstones.
+            val tombstones = dictionary(ownerAccountId, DictionaryEntry.STATUS_CONFIRMED, "")
+                .filter { it.syncId.isNotBlank() }
+                .map { entry ->
+                    EncryptedSyncOutboxItem(
+                        ownerAccountId = ownerAccountId,
+                        recordType = "dictionary",
+                        recordId = entry.syncId,
+                        baseVersion = entry.syncVersion,
+                        keyVersion = 1,
+                        nonce = "",
+                        ciphertext = "",
+                        deleted = true,
+                        createdAtMs = nowMs,
+                    )
+                }
+            if (tombstones.isNotEmpty()) upsertOutboxAll(tombstones)
+        }
+        clearDictionary(ownerAccountId)
+    }
+
+    @Transaction
+    open suspend fun resetAnalyticsWithTombstones(ownerAccountId: String?, nowMs: Long) {
+        resetAnalytics(ownerAccountId)
+        if (!ownerAccountId.isNullOrBlank()) {
+            val tombstones = analyticsEvents(ownerAccountId)
+                .filter { it.syncId.isNotBlank() }
+                .map { event ->
+                    EncryptedSyncOutboxItem(
+                        ownerAccountId = ownerAccountId,
+                        recordType = "analytics",
+                        recordId = event.syncId,
+                        baseVersion = event.syncVersion,
+                        keyVersion = 1,
+                        nonce = "",
+                        ciphertext = "",
+                        deleted = true,
+                        createdAtMs = nowMs,
+                    )
+                }
+            if (tombstones.isNotEmpty()) upsertOutboxAll(tombstones)
+            deleteAnalyticsEvents(ownerAccountId)
+        }
+    }
+
+    @Transaction
+    open suspend fun clearEveryAccountLocalData() {
+        clearAllHistory()
+        clearAllUsage()
+        clearAllDictionary()
+        clearAllAnalyticsEvents()
+        clearAllOutbox()
+    }
 
     @Transaction
     open suspend fun deleteUnassigned() {

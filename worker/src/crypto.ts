@@ -2,9 +2,11 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 export function base64Url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+  const chunks: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)));
+  }
+  return btoa(chunks.join("")).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 }
 
 export function fromBase64Url(value: string): Uint8Array {
@@ -40,22 +42,35 @@ export async function hmac(secret: string, value: string): Promise<string> {
   return base64Url(new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(value))));
 }
 
-export async function encryptString(secret: string, value: string): Promise<{ ciphertext: string; nonce: string }> {
+export async function encryptString(
+  secret: string,
+  value: string,
+  aad?: string,
+): Promise<{ ciphertext: string; nonce: string }> {
   const rawKey = fromBase64Url(secret);
   if (rawKey.byteLength !== 32) throw new Error("PII_KEY must contain 32 random bytes");
   const key = await crypto.subtle.importKey("raw", rawKey, { name: "AES-GCM" }, false, ["encrypt"]);
   const nonce = crypto.getRandomValues(new Uint8Array(12));
-  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, key, encoder.encode(value));
+  const algorithm = aad !== undefined
+    ? { name: "AES-GCM", iv: nonce, additionalData: encoder.encode(aad) }
+    : { name: "AES-GCM", iv: nonce };
+  const ciphertext = await crypto.subtle.encrypt(algorithm, key, encoder.encode(value));
   return { ciphertext: base64Url(new Uint8Array(ciphertext)), nonce: base64Url(nonce) };
 }
 
-export async function decryptString(secret: string, ciphertext: string, nonce: string): Promise<string> {
-  const key = await crypto.subtle.importKey("raw", fromBase64Url(secret), { name: "AES-GCM" }, false, ["decrypt"]);
-  const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: fromBase64Url(nonce) },
-    key,
-    fromBase64Url(ciphertext),
-  );
+export async function decryptString(
+  secret: string,
+  ciphertext: string,
+  nonce: string,
+  aad?: string,
+): Promise<string> {
+  const rawKey = fromBase64Url(secret);
+  if (rawKey.byteLength !== 32) throw new Error("PII_KEY must contain 32 random bytes");
+  const key = await crypto.subtle.importKey("raw", rawKey, { name: "AES-GCM" }, false, ["decrypt"]);
+  const algorithm = aad !== undefined
+    ? { name: "AES-GCM", iv: fromBase64Url(nonce), additionalData: encoder.encode(aad) }
+    : { name: "AES-GCM", iv: fromBase64Url(nonce) };
+  const plaintext = await crypto.subtle.decrypt(algorithm, key, fromBase64Url(ciphertext));
   return decoder.decode(plaintext);
 }
 

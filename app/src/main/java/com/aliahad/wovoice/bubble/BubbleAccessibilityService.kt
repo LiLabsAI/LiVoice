@@ -49,6 +49,7 @@ import com.aliahad.wovoice.settings.SecretStore
 import com.aliahad.wovoice.settings.SettingsStore
 import com.aliahad.wovoice.settings.SetupActivity
 import com.aliahad.wovoice.settings.androidDeviceName
+import com.aliahad.wovoice.sync.SyncResult
 import com.aliahad.wovoice.ui.dp
 import com.aliahad.wovoice.voice.WavRecorder
 import kotlinx.coroutines.CancellationException
@@ -65,6 +66,7 @@ import java.lang.ref.WeakReference
 /** User-triggered dictation with another IME. Only the focused editable node is inspected. */
 class BubbleAccessibilityService : AccessibilityService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val backgroundSyncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val handler = Handler(Looper.getMainLooper())
     private val sessions = EditorSessionGuard()
     private val client = TranscriptionClient()
@@ -81,6 +83,8 @@ class BubbleAccessibilityService : AccessibilityService() {
     private var targetNode: AccessibilityNodeInfo? = null
     private var targetInput: BubbleInputMethod.Target? = null
     private var editorMethod: BubbleInputMethod? = null
+    private var lastObservedFocusNode: AccessibilityNodeInfo? = null
+    private var lastContentRefreshAtMs = 0L
     private var captureSession = 0L
     private var state = State.IDLE
     private var activeFile: File? = null
@@ -130,6 +134,7 @@ class BubbleAccessibilityService : AccessibilityService() {
         removeSettingsListener = settings.observeFloatingBubble {
             handler.post {
                 if (!settings.floatingBubbleEnabled || (state != State.IDLE && !targetIsCurrent())) cancelWork()
+                BubbleKeepAliveService.syncState(this)
                 refreshBubble()
             }
         }
@@ -142,6 +147,7 @@ class BubbleAccessibilityService : AccessibilityService() {
             screenReceiverRegistered = true
         }
         createChannel()
+        BubbleKeepAliveService.syncState(this)
         // A killed process must not leave audio files from an interrupted capture behind.
         cacheDir.listFiles { file -> file.name.startsWith(FILE_PREFIX) }?.forEach(File::delete)
         refreshBubble()
@@ -175,6 +181,20 @@ class BubbleAccessibilityService : AccessibilityService() {
                 } == true
             if (anotherField || !targetIsCurrent()) cancelWork()
         }
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED && state == State.IDLE) {
+            val now = SystemClock.elapsedRealtime()
+            val focusUnchanged = bubble != null && lastObservedFocusNode?.let { node ->
+                runCatching { node.refresh() && node.isFocused && node.isEditable && node.isVisibleToUser }.getOrDefault(false)
+            } == true
+            if (focusUnchanged && now - lastContentRefreshAtMs < CONTENT_REFRESH_STABLE_MS) return
+            if (now - lastContentRefreshAtMs < CONTENT_REFRESH_THROTTLE_MS) {
+                scheduleRefresh(CONTENT_REFRESH_THROTTLE_MS)
+                return
+            }
+            lastContentRefreshAtMs = now
+            scheduleRefresh(CONTENT_REFRESH_THROTTLE_MS)
+            return
+        }
         // Throttle instead of restarting a debounce: a changing app must not starve the bubble.
         scheduleRefresh()
     }
@@ -189,6 +209,7 @@ class BubbleAccessibilityService : AccessibilityService() {
         if (connectedInstance?.get() === this) connectedInstance = null
         cancelWork()
         removeBubble(animate = false)
+        BubbleKeepAliveService.updateNotification(this)
         return super.onUnbind(intent)
     }
 
@@ -200,6 +221,13 @@ class BubbleAccessibilityService : AccessibilityService() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        bubbleParams?.let { params ->
+            val bounds = screenBounds()
+            params.x = (settings.bubblePositionX * bounds.width()).toInt()
+            params.y = (settings.bubblePositionY * bounds.height()).toInt()
+            clampPosition(params)
+            updatePosition()
+        }
         handler.removeCallbacks(refresh)
         refreshScheduled = true
         handler.post(refresh)
@@ -208,13 +236,18 @@ class BubbleAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         if (connectedInstance?.get() === this) connectedInstance = null
         removeSettingsListener?.invoke()
-        if (screenReceiverRegistered) unregisterReceiver(screenReceiver)
+        if (screenReceiverRegistered) {
+            runCatching { unregisterReceiver(screenReceiver) }
+            screenReceiverRegistered = false
+        }
         handler.removeCallbacksAndMessages(null)
         cancelWork()
         removeBubble(animate = false)
         exitingBubbles.toList().forEach { if (it.isAttachedToWindow) runCatching { windowManager.removeView(it) } }
         exitingBubbles.clear()
+        lastObservedFocusNode = null
         scope.cancel()
+        backgroundSyncScope.cancel()
         super.onDestroy()
     }
 
@@ -383,15 +416,19 @@ class BubbleAccessibilityService : AccessibilityService() {
 
     private fun refreshBubble() {
         if (!settings.floatingBubbleEnabled || deviceLocked() || ownKeyboardSelected()) {
+            lastObservedFocusNode = null
             if (state != State.IDLE) cancelWork()
             removeBubble()
             return
         }
-        if (captureCandidate() == null) {
+        val candidate = captureCandidate()
+        if (candidate == null) {
+            lastObservedFocusNode = null
             if (state != State.IDLE && !committing) cancelWork()
             removeBubble()
             return
         }
+        lastObservedFocusNode = candidate.focusedNode
         if (bubble == null) showBubble()
         bubble?.setPreferences(settings.hapticsEnabled, settings.animationsEnabled, settings.waveformEnabled)
         bubbleParams?.let { params -> clampPosition(params); updatePosition() }
@@ -400,10 +437,19 @@ class BubbleAccessibilityService : AccessibilityService() {
     private fun showBubble() {
         val view = DictationBubbleView(
             this,
-            onTap = { if (state == State.RECORDING) finishRecording() else if (state == State.IDLE) startRecording() },
+            onTap = {
+                when (state) {
+                    State.RECORDING -> finishRecording()
+                    State.IDLE -> startRecording()
+                    State.RETRY -> retryRecording()
+                    State.MESSAGE -> cancelWork()
+                    State.PROCESSING -> Unit
+                }
+            },
             onCancel = ::cancelWork,
             onHide = {
                 settings.floatingBubbleEnabled = false
+                BubbleKeepAliveService.syncState(this)
                 Toast.makeText(this, "Bubble hidden. Turn it on again in LiVoice Settings.", Toast.LENGTH_LONG).show()
             },
             onDrag = { dx, dy, finished ->
@@ -468,24 +514,37 @@ class BubbleAccessibilityService : AccessibilityService() {
     private fun clampPosition(params: WindowManager.LayoutParams) {
         val bounds = screenBounds()
         // Overlay y is relative to the usable window; keyboard bounds are screen coordinates.
-        val topInset = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            windowManager.currentWindowMetrics.windowInsets.getInsets(WindowInsets.Type.statusBars()).top
+        val insets = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val system = windowManager.currentWindowMetrics.windowInsets.getInsets(
+                WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars() or WindowInsets.Type.displayCutout(),
+            )
+            Rect(system.left, system.top, system.right, system.bottom)
         } else {
             @Suppress("DEPRECATION")
-            bubble?.rootWindowInsets?.systemWindowInsetTop ?: 0
+            run {
+                val raw = bubble?.rootWindowInsets
+                Rect(
+                    raw?.systemWindowInsetLeft ?: 0,
+                    raw?.systemWindowInsetTop ?: 0,
+                    raw?.systemWindowInsetRight ?: 0,
+                    raw?.systemWindowInsetBottom ?: 0,
+                )
+            }
         }
         val width = (bubble?.width ?: 0).takeIf { it > 0 } ?: dp(100)
         val height = (bubble?.height ?: 0).takeIf { it > 0 } ?: dp(60)
-        var bottom = bounds.height() - topInset - dp(40)
+        val minX = insets.left + dp(4)
+        val maxX = (bounds.width() - insets.right - width - dp(4)).coerceAtLeast(minX)
+        var bottom = bounds.height() - insets.top - insets.bottom - dp(16)
         // Stay above the other keyboard; never take input focus to measure it.
         runCatching {
             windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }?.let { keyboard ->
                 val rect = Rect()
                 keyboard.getBoundsInScreen(rect)
-                if (!rect.isEmpty) bottom = minOf(bottom, rect.top - topInset - dp(8))
+                if (!rect.isEmpty) bottom = minOf(bottom, rect.top - insets.top - dp(8))
             }
         }
-        params.x = params.x.coerceIn(dp(4), (bounds.width() - width - dp(4)).coerceAtLeast(dp(4)))
+        params.x = params.x.coerceIn(minX, maxX)
         params.y = params.y.coerceIn(dp(12), (bottom - height).coerceAtLeast(dp(12)))
     }
 
@@ -610,12 +669,8 @@ class BubbleAccessibilityService : AccessibilityService() {
                         retry = null
                         capturedContext = null
                         handler.removeCallbacks(expireRetry)
-                        val profile = withContext(Dispatchers.IO) { account.loadProfile() }
-                        if (!sessions.isActive(session) || !targetIsCurrent()) return@launch
-                        if (profile !is AccountResult.Success || !account.cloudServicesAllowed) {
-                            showMessage("Check your account", "Open app", ::openSetup)
-                            return@launch
-                        }
+                        // Insert immediately — the Worker already verified account standing
+                        // and billed quota, so an extra /v1/me RTT must never discard speech.
                         committing = true
                         val insertionResult = try {
                             commitInsertion(editor, connection, targetNode?.maxTextLength?.takeIf { it >= 0 }, response.text)
@@ -626,10 +681,17 @@ class BubbleAccessibilityService : AccessibilityService() {
                             clearTargetState()
                             state = State.IDLE
                             renderIdle()
-                            // History and analytics count only text accepted by the original editor.
-                            withContext(Dispatchers.IO) {
+                            // Persist and sync on a dedicated scope so moving focus away
+                            // right after insertion cannot cancel DB writes or cloud sync.
+                            backgroundSyncScope.launch {
                                 repository.recordSuccessfulDictation(response, response.text, result.durationMs, settings.historyEnabled)
-                                AndroidGraph.sync(this@BubbleAccessibilityService).syncNow()
+                                account.loadProfile()
+                                if (account.cloudServicesAllowed) {
+                                    val synced = AndroidGraph.sync(this@BubbleAccessibilityService).syncNow()
+                                    if (synced is SyncResult.Success) {
+                                        settings.syncWarning = synced.warning
+                                    }
+                                }
                             }
                         } else if (insertionResult == BubbleCommitResult.UNCONFIRMED) {
                             showMessage("Sent to editor", "Check text · Done", ::cancelWork)
@@ -703,12 +765,14 @@ class BubbleAccessibilityService : AccessibilityService() {
         if (auth is AccountResult.Error) return TranscriptionClient.Result.Error(auth.message, auth.retryable, auth.code, auth.status)
         val token = (auth as AccountResult.Success).value
         val glossary = repository.bestGlossary()
+        val locale = settings.locale
+        val polish = settings.polish
         val context = capturedContext?.takeIf { captureOwner == settings.accountId }?.restricted(settings.contextLevel)?.copy(style = settings.contextStyle)
         if (captureOwner != settings.accountId) return TranscriptionClient.Result.Error("Account changed. Speak again.", false)
-        val first = client.transcribe(settings.workerUrl, token, file, sentenceStart, glossary, context)
+        val first = client.transcribe(settings.workerUrl, token, file, sentenceStart, glossary, context, locale, polish)
         if (first !is TranscriptionClient.Result.Error || first.code !in setOf("TOKEN_EXPIRED", "AUTH_REQUIRED")) return first
         return when (val refreshed = account.refreshAfterRejected(token)) {
-            is AccountResult.Success -> if (captureOwner != settings.accountId) TranscriptionClient.Result.Error("Account changed. Speak again.", false) else client.transcribe(settings.workerUrl, refreshed.value, file, sentenceStart, glossary, context?.restricted(settings.contextLevel))
+            is AccountResult.Success -> if (captureOwner != settings.accountId) TranscriptionClient.Result.Error("Account changed. Speak again.", false) else client.transcribe(settings.workerUrl, refreshed.value, file, sentenceStart, glossary, context?.restricted(settings.contextLevel), locale, polish)
             is AccountResult.Error -> TranscriptionClient.Result.Error(refreshed.message, refreshed.retryable, refreshed.code, refreshed.status)
         }
     }
@@ -741,8 +805,10 @@ class BubbleAccessibilityService : AccessibilityService() {
     }
 
     private fun captureInitialContext(candidate: CaptureCandidate): DictationContext? {
-        if (Build.VERSION.SDK_INT >= 33 && candidate.inputTarget?.allowsContext == false) return null
-        if (candidate.editor != null) return candidate.editor.context(settings.contextLevel, settings.contextStyle)
+        val incognito = Build.VERSION.SDK_INT >= 33 &&
+            (candidate.inputTarget?.allowsContext == false || editorMethod?.isIncognitoInput() == true)
+        if (incognito) return null
+        if (candidate.editor != null) return candidate.editor.context(settings.contextLevel, settings.contextStyle, incognito = false)
         if (Build.VERSION.SDK_INT >= 33 && candidate.inputTarget != null) {
             // Avoid sending nearby text before async SurroundingText capture finishes; upgrade in processRecording.
             val initialLevel = if (settings.contextLevel == ContextLevel.NEARBY) ContextLevel.APP else settings.contextLevel
@@ -859,6 +925,8 @@ class BubbleAccessibilityService : AccessibilityService() {
         private const val CHANNEL_ID = "wovoice_bubble_recording"
         private const val NOTIFICATION_ID = 43
         private const val ACTION_CANCEL = "com.aliahad.wovoice.CANCEL_BUBBLE_DICTATION"
+        private const val CONTENT_REFRESH_THROTTLE_MS = 450L
+        private const val CONTENT_REFRESH_STABLE_MS = 1_500L
 
         fun isConnected(): Boolean = connectedInstance?.get() != null
 

@@ -11,7 +11,7 @@ import androidx.room.RoomDatabase
         AnalyticsSyncEvent::class,
         EncryptedSyncOutboxItem::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class WoVoiceDatabase : RoomDatabase() {

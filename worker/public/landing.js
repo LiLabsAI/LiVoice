@@ -3,11 +3,32 @@
   document.documentElement.classList.add("js");
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  // Sticky nav gets a hairline once the page scrolls.
+  // Sticky nav gets a hairline once the page scrolls, plus mobile menu drawer.
   const nav = document.querySelector(".nav");
+  const navToggle = document.querySelector(".nav-toggle");
+  const navLinks = document.querySelectorAll("#site-nav a");
   const onScroll = () => nav?.classList.toggle("is-scrolled", window.scrollY > 8);
   window.addEventListener("scroll", onScroll, { passive: true });
   onScroll();
+
+  const setMenuOpen = (open) => {
+    if (!nav || !navToggle) return;
+    nav.classList.toggle("is-open", open);
+    navToggle.setAttribute("aria-expanded", String(open));
+  };
+  navToggle?.addEventListener("click", () => {
+    setMenuOpen(!nav?.classList.contains("is-open"));
+  });
+  navLinks.forEach((link) => link.addEventListener("click", () => setMenuOpen(false)));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && nav?.classList.contains("is-open")) {
+      setMenuOpen(false);
+      navToggle?.focus();
+    }
+  });
+  window.matchMedia("(min-width: 1001px)").addEventListener("change", (event) => {
+    if (event.matches) setMenuOpen(false);
+  });
 
   // Promote the download button that matches the visitor's device.
   const agent = navigator.userAgent;
@@ -116,27 +137,83 @@
   }
   runDemo();
 
-  // Tabbed screenshot showcases (Mac app, admin console): each rotates gently
-  // on its own until the visitor picks a tab.
+  // Tabbed screenshot showcases (Mac app, admin console): keyboard-accessible,
+  // pausable, and rotates gently until paused or manually selected.
   document.querySelectorAll("[data-showcase]").forEach((showcase) => {
     const tabs = [...showcase.querySelectorAll("[data-tab]")];
     const shots = [...showcase.querySelectorAll("[data-shot]")];
+    const pauseButton = showcase.querySelector("[data-showcase-pause]");
+    let current = 0;
+    let paused = reduceMotion;
     let timer = null;
-    const show = (name) => {
-      tabs.forEach((tab) => tab.setAttribute("aria-selected", String(tab.dataset.tab === name)));
-      shots.forEach((shot) => shot.classList.toggle("is-active", shot.dataset.shot === name));
+
+    const show = (index) => {
+      current = (index + tabs.length) % tabs.length;
+      const name = tabs[current]?.dataset.tab;
+      tabs.forEach((tab, tabIndex) => {
+        const selected = tabIndex === current;
+        tab.setAttribute("aria-selected", String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+      });
+      shots.forEach((shot) => {
+        const active = shot.dataset.shot === name;
+        shot.classList.toggle("is-active", active);
+        shot.hidden = !active;
+      });
     };
-    tabs.forEach((tab) => tab.addEventListener("click", () => {
-      clearInterval(timer);
-      show(tab.dataset.tab);
-    }));
-    if (!reduceMotion && tabs.length > 1) {
-      let current = 0;
-      timer = setInterval(() => {
-        current = (current + 1) % tabs.length;
-        show(tabs[current].dataset.tab);
-      }, 5000);
-    }
+
+    const syncPauseUi = () => {
+      if (!pauseButton) return;
+      pauseButton.setAttribute("aria-pressed", String(paused));
+      pauseButton.textContent = paused ? "Play" : "Pause";
+    };
+
+    const stopTimer = () => {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    const startTimer = () => {
+      stopTimer();
+      if (paused || tabs.length < 2) return;
+      timer = setInterval(() => show(current + 1), 5000);
+    };
+
+    tabs.forEach((tab, index) => {
+      tab.addEventListener("click", () => {
+        paused = true;
+        stopTimer();
+        syncPauseUi();
+        show(index);
+      });
+      tab.addEventListener("keydown", (event) => {
+        let nextIndex = null;
+        if (event.key === "ArrowRight") nextIndex = (index + 1) % tabs.length;
+        else if (event.key === "ArrowLeft") nextIndex = (index - 1 + tabs.length) % tabs.length;
+        else if (event.key === "Home") nextIndex = 0;
+        else if (event.key === "End") nextIndex = tabs.length - 1;
+        if (nextIndex === null) return;
+        event.preventDefault();
+        paused = true;
+        stopTimer();
+        syncPauseUi();
+        show(nextIndex);
+        tabs[nextIndex]?.focus();
+      });
+    });
+
+    pauseButton?.addEventListener("click", () => {
+      paused = !paused;
+      syncPauseUi();
+      if (paused) stopTimer();
+      else startTimer();
+    });
+
+    show(0);
+    syncPauseUi();
+    startTimer();
   });
 
   // Subtle 3D tilt on screenshot frames.
@@ -156,16 +233,78 @@
     });
   }
 
-  // Android phone carousel.
+  // Android phone carousel with keyboard navigation and pause control.
   const slides = [...document.querySelectorAll("[data-carousel] .slide")];
-  const dots = [...document.querySelectorAll("[data-carousel-dots] i")];
-  if (slides.length > 1 && !reduceMotion) {
+  const dots = [...document.querySelectorAll("[data-carousel-dots] button")];
+  const carouselPause = document.querySelector("[data-carousel-pause]");
+  if (slides.length > 1) {
     let slide = 0;
-    setInterval(() => {
-      slide = (slide + 1) % slides.length;
-      slides.forEach((element, index) => element.classList.toggle("is-active", index === slide));
-      dots.forEach((element, index) => element.classList.toggle("is-active", index === slide));
-    }, 3600);
+    let paused = reduceMotion;
+    let timer = null;
+
+    const showSlide = (index) => {
+      slide = (index + slides.length) % slides.length;
+      slides.forEach((element, idx) => element.classList.toggle("is-active", idx === slide));
+      dots.forEach((element, idx) => {
+        const active = idx === slide;
+        element.classList.toggle("is-active", active);
+        element.setAttribute("aria-selected", String(active));
+        element.tabIndex = active ? 0 : -1;
+      });
+    };
+
+    const syncCarouselPause = () => {
+      if (!carouselPause) return;
+      carouselPause.setAttribute("aria-pressed", String(paused));
+      carouselPause.textContent = paused ? "Play" : "Pause";
+    };
+
+    const stopCarousel = () => {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    const startCarousel = () => {
+      stopCarousel();
+      if (paused) return;
+      timer = setInterval(() => showSlide(slide + 1), 3600);
+    };
+
+    dots.forEach((dot, index) => {
+      dot.addEventListener("click", () => {
+        paused = true;
+        stopCarousel();
+        syncCarouselPause();
+        showSlide(index);
+      });
+      dot.addEventListener("keydown", (event) => {
+        let nextIndex = null;
+        if (event.key === "ArrowRight") nextIndex = (index + 1) % dots.length;
+        else if (event.key === "ArrowLeft") nextIndex = (index - 1 + dots.length) % dots.length;
+        else if (event.key === "Home") nextIndex = 0;
+        else if (event.key === "End") nextIndex = dots.length - 1;
+        if (nextIndex === null) return;
+        event.preventDefault();
+        paused = true;
+        stopCarousel();
+        syncCarouselPause();
+        showSlide(nextIndex);
+        dots[nextIndex]?.focus();
+      });
+    });
+
+    carouselPause?.addEventListener("click", () => {
+      paused = !paused;
+      syncCarouselPause();
+      if (paused) stopCarousel();
+      else startCarousel();
+    });
+
+    showSlide(0);
+    syncCarouselPause();
+    startCarousel();
   }
 
   // Feature cards: a glow that follows the pointer.

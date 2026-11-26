@@ -18,7 +18,7 @@
       <div class="brand"><span class="mark" aria-hidden="true"></span>LiVoice</div>
 
       <section class="card" id="email-step">
-        <h2 id="auth-title">Sign in or register</h2>
+        <h1 id="auth-title">Sign in or register</h1>
         <p class="note" id="auth-intro">We’ll email a six-digit verification code. No password required.</p>
         <form id="email-form">
           <div class="field">
@@ -29,7 +29,7 @@
           <p class="status" id="security-status" role="status">Loading security check…</p>
           <label class="check" id="terms-row">
             <input id="terms" type="checkbox" required>
-            <span>I agree to the <a href="/terms" target="_blank">Terms</a> and <a href="/privacy" target="_blank">Privacy Policy</a>.</span>
+            <span>I agree to the <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a> and <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.</span>
           </label>
           <button id="send" type="submit" disabled>Send verification code</button>
           <p class="status" id="email-status" role="status"></p>
@@ -45,7 +45,10 @@
             <input class="code" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
           </div>
           <button id="verify" type="submit">Verify and return to LiVoice</button>
-          <div class="actions"><button class="secondary" id="restart" type="button">Use another email</button></div>
+          <div class="actions">
+            <button class="secondary" id="resend" type="button" disabled>Resend code</button>
+            <button class="secondary" id="restart" type="button">Use another email</button>
+          </div>
           <p class="status" id="code-status" role="status"></p>
         </form>
       </section>

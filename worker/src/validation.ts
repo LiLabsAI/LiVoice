@@ -56,7 +56,15 @@ function occurrences(words: string[], term: string[]): number {
   return count;
 }
 function expanded(text: string): string {
-  return text.toLowerCase().replace(/’/gu, "'").replace(/\bcan't\b/gu, "can not").replace(/\bwon't\b/gu, "will not").replace(/\bcannot\b/gu, "can not").replace(/n['’]t\b/gu, " not");
+  return text
+    .toLowerCase()
+    .replace(/’/gu, "'")
+    .replace(/\bcan't\b/gu, "can not")
+    .replace(/\bwon't\b/gu, "will not")
+    .replace(/\bcannot\b/gu, "can not")
+    .replace(/n['’]t\b/gu, " not")
+    .replace(/([a-z])'ll\b/gu, "$1 will")
+    .replace(/([a-z])'d\b/gu, "$1 would");
 }
 function meaningMarkers(text: string): string {
   return (expanded(text).match(/\b(?:not|no|never|without|hardly|barely|can|could|will|would|should|may|might|must)\b/gu) ?? []).join("|");

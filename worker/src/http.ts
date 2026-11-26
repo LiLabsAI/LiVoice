@@ -40,8 +40,25 @@ export async function readJson<T>(request: Request, maxBytes = 32_768): Promise<
   }
 }
 
+export const API_SECURITY_HEADERS: Record<string, string> = {
+  "Cache-Control": "no-store",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
+  "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+};
+
 export function noStoreJson(value: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
-  headers.set("Cache-Control", "no-store");
+  for (const [name, headerValue] of Object.entries(API_SECURITY_HEADERS)) {
+    headers.set(name, headerValue);
+  }
   return Response.json(value, { ...init, headers });
+}
+
+export function noStoreEmpty(status = 204, init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers);
+  for (const [name, headerValue] of Object.entries(API_SECURITY_HEADERS)) {
+    headers.set(name, headerValue);
+  }
+  return new Response(null, { ...init, status, headers });
 }

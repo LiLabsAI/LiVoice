@@ -2,9 +2,9 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "wovoice-transcription",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-05",
+  "compatibility_date": "2026-11-24",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": true,
+  "workers_dev": false,
   "routes": [
     {
       "pattern": "wovoice.aliahad.com",
@@ -17,7 +17,7 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "run_worker_first": ["/v1/*", "/.well-known/*", "/app/callback*", "/login*", "/admin*", "/download/*"]
+    "run_worker_first": ["/v1/*", "/v2/*", "/.well-known/*", "/app/callback*", "/login*", "/admin*", "/download/*"]
   },
   "d1_databases": [
     {
@@ -72,7 +72,11 @@
   },
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 1
+    "head_sampling_rate": 1,
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.1
+    }
   },
   "secrets": {
     "required": ["AUTH_MASTER_KEY", "PII_KEY", "TURNSTILE_SECRET", "SYNC_KEK"]

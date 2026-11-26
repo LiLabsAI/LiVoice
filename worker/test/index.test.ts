@@ -3,7 +3,9 @@ import type { D1Migration } from "@cloudflare/vitest-pool-workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { base64Url, sha256 } from "../src/crypto";
 import { buildUsage, createHandler } from "../src/handler";
+import { cleanupExpiredCredentials } from "../src/index";
 import { cleanupModerationData, processModerationNotifications } from "../src/moderation";
+import { parseOptions } from "../src/options";
 import { completeQuota, releaseExpiredReservations, releaseQuota, reserveQuota } from "../src/quota";
 import { applyHistoryRetention, purgeLegacyVaults } from "../src/records";
 import type { AdminServices, AppEnv, AuthServices, Services } from "../src/types";
@@ -49,7 +51,7 @@ describe("LiVoice Worker", () => {
     });
   });
 
-  it("serves the current, legacy, and local-development App Link certificates", async () => {
+  it("gates the local debug App Link certificate out of production", async () => {
     const production = fakeEnv();
     production.ENVIRONMENT = "production";
     const productionResponse = await createHandler(fakeServices())(
@@ -58,10 +60,20 @@ describe("LiVoice Worker", () => {
     );
     const productionBody = JSON.stringify(await productionResponse.json());
     expect(productionResponse.headers.get("cache-control")).toBe("no-store");
+    expect(productionResponse.headers.get("x-content-type-options")).toBe("nosniff");
     expect(productionBody).toContain('"package_name":"com.aliahad.wovoice"');
     expect(productionBody).toContain("61:E2:D4:78:A0:75:E3:FD");
     expect(productionBody).toContain("3A:E4:93:35:28:83:E2:7F");
-    expect(productionBody).toContain("EC:F2:BE:43:B8:6F:94:29");
+    expect(productionBody).not.toContain("EC:F2:BE:43:B8:6F:94:29");
+
+    const dev = fakeEnv();
+    dev.ENVIRONMENT = "development";
+    const devResponse = await createHandler(fakeServices())(
+      new Request("https://wovoice.aliahad.com/.well-known/assetlinks.json"),
+      dev,
+    );
+    const devBody = JSON.stringify(await devResponse.json());
+    expect(devBody).toContain("EC:F2:BE:43:B8:6F:94:29");
   });
 
   it("serves callback recovery assets without caching authorization codes", async () => {
@@ -639,19 +651,19 @@ describe("admin moderation", () => {
     const session = await fixture.handler(adminRequest("/session", browser), fixture.environment);
     expect(session.status).toBe(200);
     expect((await session.json()) as object).toMatchObject({
-      admin: { email: "aliahadmd1@gmail.com", role: "admin" },
+      admin: { email: "admin@example.com", role: "admin" },
     });
     expect(browser.setCookies.join(";")).toContain("HttpOnly");
     expect(browser.setCookies.join(";")).toContain("SameSite=Strict");
     expect(browser.setCookies.join(";")).toContain("Secure");
 
-    const users = await fixture.handler(adminRequest("/users?query=aliahadmd1%40gmail.com", browser), fixture.environment);
+    const users = await fixture.handler(adminRequest("/users?query=admin%40example.com", browser), fixture.environment);
     const body = await users.json() as { users: Array<Record<string, unknown>> };
     expect(users.status).toBe(200);
     expect(body.users).toHaveLength(1);
     expect(body.users[0]).not.toHaveProperty("ciphertext");
     expect(body.users[0]).not.toHaveProperty("transcript");
-    expect(JSON.stringify(body)).not.toContain("aliahadmd1@gmail.com");
+    expect(JSON.stringify(body)).not.toContain("admin@example.com");
   });
 
   it("suspends atomically, revokes sessions, audits, and permits a restricted re-login", async () => {
@@ -979,8 +991,8 @@ interface AdminBrowserSession {
 async function registerAndSignInAdmin(
   fixture: ReturnType<typeof adminFixture>,
 ): Promise<AdminBrowserSession> {
-  fixture.environment.ADMIN_BOOTSTRAP_EMAIL = "aliahadmd1@gmail.com";
-  const android = await registerAndSignIn("aliahadmd1@gmail.com", fixture);
+  fixture.environment.ADMIN_BOOTSTRAP_EMAIL = "admin@example.com";
+  const android = await registerAndSignIn("admin@example.com", fixture);
   return signInExistingAdmin(fixture, android);
 }
 
@@ -989,7 +1001,7 @@ async function signInExistingAdmin(
   android: { accessToken: string; refreshToken: string } = { accessToken: "", refreshToken: "" },
 ): Promise<AdminBrowserSession> {
   const start = await fixture.handler(adminAuthRequest("/auth/start", {
-    email: "aliahadmd1@gmail.com",
+    email: "admin@example.com",
     turnstileToken: "turnstile-test-token",
   }), fixture.environment);
   expect(start.status).toBe(200);
@@ -1418,4 +1430,440 @@ it("allows reasoning tokens before final cleanup text even for a short transcrip
   // returning finish_reason=length and content=null. The same input completed
   // in 149 tokens with the configured allowance; reasoning must never be pasted.
   expect(run).toHaveBeenCalledWith("@cf/openai/gpt-oss-20b", expect.objectContaining({ max_tokens: 1500 }), expect.anything());
+});
+
+describe("audit remediation regressions", () => {
+  it("enforces PKCE codeVerifier on DELETE /v1/me and cleans up login challenges and global daily reservations", async () => {
+    const fixture = authFixture();
+    const email = "delete-pkce@example.com";
+    const signedIn = await registerAndSignIn(email, fixture);
+    const me = await fixture.handler(
+      new Request("https://worker.test/v1/me", { headers: bearer(signedIn.accessToken) }),
+      fixture.environment,
+    );
+    const userId = ((await me.json()) as { user: { id: string } }).user.id;
+    const db = fixture.environment.DB;
+    const userRow = await db.prepare("SELECT email_lookup FROM users WHERE id = ?")
+      .bind(userId).first<{ email_lookup: string }>();
+    const emailLookup = userRow!.email_lookup;
+
+    // Seed an in-flight quota reservation and an admin_login_challenge for this email.
+    const reservation = await reserveQuota(fixture.environment, userId, crypto.randomUUID(), 15);
+    const globalBefore = await db.prepare("SELECT reserved_neurons FROM global_daily_usage WHERE date_key = ?")
+      .bind(reservation.dateKey).first<{ reserved_neurons: number }>();
+    expect(globalBefore!.reserved_neurons).toBeGreaterThanOrEqual(reservation.reservedNeurons);
+
+    await db.prepare(
+      `INSERT INTO admin_login_challenges(id, email_lookup, user_id, code_hash, attempts, created_at, expires_at, resend_after)
+       VALUES(?, ?, ?, 'hash', 0, ?, ?, ?)`,
+    ).bind(crypto.randomUUID(), emailLookup, userId, Date.now(), Date.now() + 600_000, Date.now() + 60_000).run();
+
+    // Clear recent login_challenges so delete OTP start is not rate-limited by 60s resend.
+    await db.prepare("DELETE FROM login_challenges WHERE email_lookup = ?").bind(emailLookup).run();
+
+    const deleteVerifier = "d".repeat(64);
+    const deleteChallenge = await sha256(deleteVerifier);
+    const start = await fixture.handler(jsonRequest("/v1/auth/start", {
+      email,
+      turnstileToken: "turnstile-test-token",
+      codeChallenge: deleteChallenge,
+      intent: "delete",
+    }), fixture.environment);
+    expect(start.status).toBe(200);
+    const challengeId = ((await start.json()) as { challengeId: string }).challengeId;
+    const code = fixture.sent.at(-1)!.code;
+    const verify = await fixture.handler(jsonRequest("/v1/auth/verify", { challengeId, code }), fixture.environment);
+    expect(verify.status).toBe(200);
+    const { reauthToken } = await verify.json() as { reauthToken: string };
+
+    // Missing verifier must fail with 401 AUTH_REQUIRED.
+    const missingVerifier = await fixture.handler(
+      jsonRequest("/v1/me", { reauthToken }, signedIn.accessToken, "DELETE"),
+      fixture.environment,
+    );
+    expect(missingVerifier.status).toBe(401);
+    expect((await missingVerifier.json()) as object).toMatchObject({ error: { code: "AUTH_REQUIRED" } });
+
+    // Mismatched verifier must fail with 401 AUTH_REQUIRED.
+    const wrongVerifier = await fixture.handler(
+      jsonRequest("/v1/me", { reauthToken, codeVerifier: "x".repeat(64) }, signedIn.accessToken, "DELETE"),
+      fixture.environment,
+    );
+    expect(wrongVerifier.status).toBe(401);
+
+    // Matching verifier deletes user, clears login/admin challenges, and releases global reserved neurons.
+    const deleted = await fixture.handler(
+      jsonRequest("/v1/me", { reauthToken, codeVerifier: deleteVerifier }, signedIn.accessToken, "DELETE"),
+      fixture.environment,
+    );
+    expect(deleted.status).toBe(204);
+    expect(deleted.headers.get("cache-control")).toBe("no-store");
+
+    const remainingUser = await db.prepare("SELECT id FROM users WHERE id = ?").bind(userId).first();
+    expect(remainingUser).toBeNull();
+    const remainingLoginChallenges = await db.prepare("SELECT COUNT(*) AS count FROM login_challenges WHERE email_lookup = ?")
+      .bind(emailLookup).first<{ count: number }>();
+    const remainingAdminChallenges = await db.prepare("SELECT COUNT(*) AS count FROM admin_login_challenges WHERE email_lookup = ?")
+      .bind(emailLookup).first<{ count: number }>();
+    expect(remainingLoginChallenges?.count).toBe(0);
+    expect(remainingAdminChallenges?.count).toBe(0);
+
+    const globalAfter = await db.prepare("SELECT reserved_neurons FROM global_daily_usage WHERE date_key = ?")
+      .bind(reservation.dateKey).first<{ reserved_neurons: number }>();
+    expect(globalAfter!.reserved_neurons).toBeCloseTo(globalBefore!.reserved_neurons - reservation.reservedNeurons, 3);
+  });
+
+  it("does not decrement the monthly email ceiling when admin OTP start hits 2,500", async () => {
+    const fixture = adminFixture();
+    await registerAndSignInAdmin(fixture);
+    const db = fixture.environment.DB;
+    await db.prepare("DELETE FROM admin_login_challenges").run();
+    const monthKey = new Date().toISOString().slice(0, 7);
+    await db.prepare(
+      "INSERT OR REPLACE INTO service_monthly_usage(month_key, verification_emails, moderation_emails) VALUES(?, 2500, 0)",
+    ).bind(monthKey).run();
+    const sentBefore = fixture.sent.length;
+    try {
+      const first = await fixture.handler(adminAuthRequest("/auth/start", {
+        email: "admin@example.com",
+        turnstileToken: "turnstile-test-token",
+      }), fixture.environment);
+      expect(first.status).toBe(503);
+      expect((await first.json()) as object).toMatchObject({ error: { code: "EMAIL_RATE_LIMITED" } });
+      expect(fixture.sent).toHaveLength(sentBefore);
+
+      const countRow = await db.prepare("SELECT verification_emails FROM service_monthly_usage WHERE month_key = ?")
+        .bind(monthKey).first<{ verification_emails: number }>();
+      expect(countRow?.verification_emails).toBe(2500);
+
+      // A second attempt must also be refused instead of bypassing at 2,499.
+      const second = await fixture.handler(adminAuthRequest("/auth/start", {
+        email: "admin@example.com",
+        turnstileToken: "turnstile-test-token",
+      }), fixture.environment);
+      expect(second.status).toBe(503);
+      expect(fixture.sent).toHaveLength(sentBefore);
+    } finally {
+      await db.prepare("UPDATE service_monthly_usage SET verification_emails = 0, moderation_emails = 0 WHERE month_key = ?")
+        .bind(monthKey).run();
+    }
+  });
+
+  it("atomically leases moderation notifications and never re-delivers after send succeeds", async () => {
+    const fixture = authFixture();
+    const signedIn = await registerAndSignIn("mod-atomic@example.com", fixture);
+    const me = await fixture.handler(
+      new Request("https://worker.test/v1/me", { headers: bearer(signedIn.accessToken) }),
+      fixture.environment,
+    );
+    const userId = ((await me.json()) as { user: { id: string } }).user.id;
+    const db = fixture.environment.DB;
+    const now = Date.now();
+    const noticeId = crypto.randomUUID();
+    await db.prepare(
+      `INSERT INTO moderation_notifications
+        (id, user_id, action, public_message, effective_until, status, attempts, next_attempt_at, created_at, updated_at)
+       VALUES(?, ?, 'suspended', 'Paused for review.', NULL, 'pending', 0, ?, ?, ?)`,
+    ).bind(noticeId, userId, now - 10, now - 10, now - 10).run();
+
+    let sendCount = 0;
+    const slowServices: AdminServices = {
+      sendModerationEmail: vi.fn(async () => {
+        sendCount += 1;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }),
+    };
+
+    const [a, b] = await Promise.all([
+      processModerationNotifications(fixture.environment, slowServices, 10),
+      processModerationNotifications(fixture.environment, slowServices, 10),
+    ]);
+    expect(a + b).toBe(1);
+    expect(sendCount).toBe(1);
+    const sentRow = await db.prepare("SELECT status, attempts FROM moderation_notifications WHERE id = ?")
+      .bind(noticeId).first<{ status: string; attempts: number }>();
+    expect(sentRow).toMatchObject({ status: "sent", attempts: 1 });
+
+    // Simulate a DB write failure on the first mark-sent UPDATE after email delivery.
+    const noticeId2 = crypto.randomUUID();
+    await db.prepare(
+      `INSERT INTO moderation_notifications
+        (id, user_id, action, public_message, effective_until, status, attempts, next_attempt_at, created_at, updated_at)
+       VALUES(?, ?, 'banned', 'Disabled.', NULL, 'pending', 0, ?, ?, ?)`,
+    ).bind(noticeId2, userId, now - 10, now - 10, now - 10).run();
+
+    let markSentThrowsOnce = true;
+    const wrappedDb = {
+      prepare(sql: string) {
+        const statement = db.prepare(sql);
+        if (sql.includes("SET status = 'sent'") && sql.includes("last_error = NULL")) {
+          const origBind = statement.bind.bind(statement);
+          return {
+            ...statement,
+            bind(...values: unknown[]) {
+              const bound = origBind(...values);
+              return {
+                ...bound,
+                async run() {
+                  if (markSentThrowsOnce) {
+                    markSentThrowsOnce = false;
+                    throw new Error("transient d1 hiccup");
+                  }
+                  return bound.run();
+                },
+              };
+            },
+          };
+        }
+        return statement;
+      },
+      batch: db.batch.bind(db),
+    } as unknown as D1Database;
+
+    const deliveredSpy = vi.fn(async () => {});
+    const envWithFlakyDb = { ...fixture.environment, DB: wrappedDb };
+    await processModerationNotifications(envWithFlakyDb, { sendModerationEmail: deliveredSpy }, 10);
+    expect(deliveredSpy).toHaveBeenCalledTimes(1);
+
+    const row2 = await db.prepare("SELECT status, attempts FROM moderation_notifications WHERE id = ?")
+      .bind(noticeId2).first<{ status: string; attempts: number }>();
+    expect(row2?.status).toBe("sent");
+
+    // Subsequent cron run must not re-deliver.
+    await processModerationNotifications(fixture.environment, { sendModerationEmail: deliveredSpy }, 10);
+    expect(deliveredSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves 30-day admin_browser_sessions audit trail during cleanupExpiredCredentials", async () => {
+    const fixture = adminFixture();
+    await registerAndSignInAdmin(fixture);
+    const db = fixture.environment.DB;
+    const sessionRow = await db.prepare(
+      "SELECT id, challenge_id FROM admin_browser_sessions ORDER BY created_at DESC LIMIT 1",
+    ).first<{ id: string; challenge_id: string }>();
+    expect(sessionRow).toBeTruthy();
+
+    const baseNow = Date.now();
+    // Mark the session revoked 2 days ago and its challenge expired 2 days ago.
+    const twoDaysAgo = baseNow - 2 * 86_400_000;
+    await db.batch([
+      db.prepare("UPDATE admin_browser_sessions SET revoked_at = ? WHERE id = ?").bind(twoDaysAgo, sessionRow!.id),
+      db.prepare("UPDATE admin_login_challenges SET expires_at = ? WHERE id = ?").bind(twoDaysAgo, sessionRow!.challenge_id),
+      // Add an unreferenced expired admin challenge that SHOULD be deleted.
+      db.prepare(
+        `INSERT INTO admin_login_challenges(id, email_lookup, user_id, code_hash, attempts, created_at, expires_at, resend_after)
+         VALUES('orphan-challenge', 'lookup', NULL, 'hash', 0, ?, ?, ?)`,
+      ).bind(twoDaysAgo, twoDaysAgo, twoDaysAgo),
+    ]);
+
+    await cleanupExpiredCredentials(fixture.environment, baseNow);
+
+    const preservedSession = await db.prepare("SELECT id FROM admin_browser_sessions WHERE id = ?")
+      .bind(sessionRow!.id).first();
+    const preservedChallenge = await db.prepare("SELECT id FROM admin_login_challenges WHERE id = ?")
+      .bind(sessionRow!.challenge_id).first();
+    const orphanChallenge = await db.prepare("SELECT id FROM admin_login_challenges WHERE id = 'orphan-challenge'")
+      .first();
+    expect(preservedSession).not.toBeNull();
+    expect(preservedChallenge).not.toBeNull();
+    expect(orphanChallenge).toBeNull();
+
+    // After 31 days, both the revoked session and its challenge are cleaned up.
+    await cleanupExpiredCredentials(fixture.environment, baseNow + 31 * 86_400_000);
+    expect(await db.prepare("SELECT id FROM admin_browser_sessions WHERE id = ?").bind(sessionRow!.id).first()).toBeNull();
+    expect(await db.prepare("SELECT id FROM admin_login_challenges WHERE id = ?").bind(sessionRow!.challenge_id).first()).toBeNull();
+  });
+
+  it("supports multi-locale options and polish levels (off, light, strong)", async () => {
+    expect(parseOptions(JSON.stringify({ locale: "auto", polish: "off", sentenceStart: true, commands: [], glossary: [] })))
+      .toMatchObject({ locale: "auto", polish: "off" });
+    expect(parseOptions(JSON.stringify({ locale: "hi-IN", polish: "strong", sentenceStart: false, commands: [], glossary: [] })))
+      .toMatchObject({ locale: "hi-IN", polish: "strong" });
+    expect(parseOptions(JSON.stringify({ locale: "fr", polish: "light", sentenceStart: true, commands: [], glossary: [] })))
+      .toMatchObject({ locale: "fr", polish: "light" });
+    expect(() => parseOptions(JSON.stringify({ locale: "en_US", polish: "light", sentenceStart: true, commands: [], glossary: [] })))
+      .toThrow();
+    expect(() => parseOptions(JSON.stringify({ locale: "en-IN", polish: "extreme", sentenceStart: true, commands: [], glossary: [] })))
+      .toThrow();
+
+    // polish: "off" skips cleanup service entirely.
+    const services = fakeServices("raw transcript here", "Polished text.");
+    const fixture = authFixture(services);
+    const signedIn = await registerAndSignIn("polish-off@example.com", fixture);
+    const response = await fixture.handler(
+      transcriptionRequest(makeWav(1), signedIn.accessToken, "https://worker.test", { locale: "auto", polish: "off" }),
+      fixture.environment,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("strict-transport-security")).toContain("max-age=63072000");
+    expect(await response.json()).toMatchObject({ text: "raw transcript here", polished: false });
+    expect(services.polish).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 on malformed multipart uploads and reports live /v1/status health", async () => {
+    const fixture = adminFixture();
+    const browser = await registerAndSignInAdmin(fixture);
+
+    // Malformed multipart returns 400 INVALID_REQUEST instead of 500.
+    const malformed = await fixture.handler(
+      new Request("https://worker.test/v1/transcriptions", {
+        method: "POST",
+        headers: {
+          ...bearer(browser.android.accessToken),
+          "content-type": "multipart/form-data; boundary=broken-boundary",
+        },
+        body: "not a valid multipart payload",
+      }),
+      fixture.environment,
+    );
+    expect(malformed.status).toBe(400);
+    expect(malformed.headers.get("cache-control")).toBe("no-store");
+    expect(await malformed.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+
+    // Healthy live status
+    const healthy = await fixture.handler(new Request("https://worker.test/v1/status"), fixture.environment);
+    expect(healthy.status).toBe(200);
+    expect(healthy.headers.get("cache-control")).toBe("no-store");
+    expect(await healthy.json()).toMatchObject({
+      status: "online",
+      checkedAt: expect.any(Number),
+      components: { database: "operational", transcription: "operational", quota: "operational" },
+    });
+
+    // Maintenance mode reflected in /v1/status
+    const config = defaultAiConfiguration();
+    config.service.enabled = false;
+    config.service.maintenanceMessage = "Scheduled maintenance window.";
+    const saved = await (await fixture.handler(adminRequest("/ai/config/draft", browser, "POST", {
+      config,
+      expectedVersion: 0,
+      reason: "Test maintenance status probe",
+    }), fixture.environment)).json() as { draft: { id: string } };
+    await fixture.handler(adminRequest("/ai/config/publish", browser, "POST", {
+      revisionId: saved.draft.id,
+      expectedVersion: 1,
+      reason: "Publish maintenance state",
+    }), fixture.environment);
+
+    const maintenance = await fixture.handler(new Request("https://worker.test/v1/status"), fixture.environment);
+    expect(maintenance.status).toBe(200);
+    expect(await maintenance.json()).toMatchObject({
+      status: "maintenance",
+      maintenanceMessage: "Scheduled maintenance window.",
+      components: { database: "operational", transcription: "maintenance", quota: "operational" },
+    });
+
+    // Exhausted daily neuron budget reports degraded
+    const dateKey = new Date().toISOString().slice(0, 10);
+    await env.DB.prepare("INSERT OR REPLACE INTO global_daily_usage(date_key, used_neurons, reserved_neurons) VALUES(?, 8000, 0)")
+      .bind(dateKey).run();
+    try {
+      const exhausted = await fixture.handler(new Request("https://worker.test/v1/status"), fixture.environment);
+      expect(await exhausted.json()).toMatchObject({
+        status: "degraded",
+        components: { database: "operational", quota: "exhausted" },
+      });
+    } finally {
+      await env.DB.prepare("UPDATE global_daily_usage SET used_neurons = 0, reserved_neurons = 0 WHERE date_key = ?")
+        .bind(dateKey).run();
+    }
+  });
+
+  it("rejects WAV files with invalid byteRate, blockAlign, or odd dataBytes", () => {
+    const badByteRate = makeWav(1);
+    new DataView(badByteRate).setUint32(28, 16_000, true); // should be 32_000
+    expect(() => validateWav(badByteRate)).toThrow("16 kHz");
+
+    const badBlockAlign = makeWav(1);
+    new DataView(badBlockAlign).setUint16(32, 4, true); // should be 2
+    expect(() => validateWav(badBlockAlign)).toThrow("16 kHz");
+
+    const oddDataSize = 16_001;
+    const oddBuffer = new ArrayBuffer(44 + oddDataSize + 1);
+    const bytes = new Uint8Array(oddBuffer);
+    const view = new DataView(oddBuffer);
+    writeAscii(bytes, 0, "RIFF");
+    view.setUint32(4, 36 + oddDataSize + 1, true);
+    writeAscii(bytes, 8, "WAVEfmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, 16_000, true);
+    view.setUint32(28, 32_000, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeAscii(bytes, 36, "data");
+    view.setUint32(40, oddDataSize, true);
+    expect(() => validateWav(oddBuffer)).toThrow("misaligned");
+  });
+
+  it("ignores /releases/tag/ links inside Atom <content> body HTML", async () => {
+    const feedWithContentLinks = `<feed>
+      <entry>
+        <link rel="alternate" type="text/html" href="https://github.com/LiLabsAI/LiVoice/releases/tag/v1.7.0"/>
+        <content type="html">Compared against &lt;a href="https://github.com/LiLabsAI/LiVoice/releases/tag/desktop-v9.9.9"&gt;fake&lt;/a&gt; and <a href="https://github.com/LiLabsAI/LiVoice/releases/tag/desktop-v8.8.8">fake2</a></content>
+      </entry>
+      <entry>
+        <link rel="alternate" type="text/html" href="https://github.com/LiLabsAI/LiVoice/releases/tag/desktop-v1.2.0"/>
+        <content type="html">Notes mentioning https://github.com/LiLabsAI/LiVoice/releases/tag/v9.9.9</content>
+      </entry>
+    </feed>`;
+    const fetchMock = vi.fn(async () => new Response(feedWithContentLinks));
+    const handler = createHandler(fakeServices(), undefined, undefined, { fetch: fetchMock, cache: () => null });
+    const response = await handler(new Request("https://wovoice.aliahad.com/download/latest.json"), fakeEnv());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      android: { version: "1.7.0" },
+      mac: { version: "1.2.0" },
+    });
+  });
+
+  it("accepts quoted dictation prose and expands 'll / 'd contractions in output validation", () => {
+    expect(extractCleanedText('"Hello," she said.')).toBe('"Hello," she said.');
+    expect(extractCleanedText('"unterminated string')).toBeNull();
+    expect(chooseSafePolish("I will go tomorrow", "I'll go tomorrow.")).toBe("I'll go tomorrow.");
+    expect(chooseSafePolish("I would prefer tea", "I'd prefer tea.")).toBe("I'd prefer tea.");
+  });
+
+  it("validates sync cursor, computes accurate hasMore, and bounds analytics payload size", async () => {
+    const fixture = authFixture();
+    const signedIn = await registerAndSignIn("sync-bounds@example.com", fixture);
+    const badCursor = await fixture.handler(
+      new Request("https://worker.test/v2/sync?cursor=abc", { headers: bearer(signedIn.accessToken) }),
+      fixture.environment,
+    );
+    expect(badCursor.status).toBe(400);
+    const negCursor = await fixture.handler(
+      new Request("https://worker.test/v2/sync?cursor=-5", { headers: bearer(signedIn.accessToken) }),
+      fixture.environment,
+    );
+    expect(negCursor.status).toBe(400);
+
+    const hugeAnalytics = await fixture.handler(jsonRequest("/v2/sync/batch", {
+      items: [{
+        id: "a1",
+        type: "analytics",
+        baseVersion: 0,
+        deleted: false,
+        payload: { createdAtMs: Date.now(), blob: "x".repeat(5_000) },
+      }],
+    }, signedIn.accessToken), fixture.environment);
+    expect(hugeAnalytics.status).toBe(413);
+
+    // Push exactly 2 items and pull with limit=2 -> hasMore must be false!
+    await fixture.handler(jsonRequest("/v2/sync/batch", {
+      items: [
+        { id: "h1", type: "history", baseVersion: 0, deleted: false, payload: { text: "One.", createdAtMs: Date.now() } },
+        { id: "h2", type: "history", baseVersion: 0, deleted: false, payload: { text: "Two.", createdAtMs: Date.now() } },
+      ],
+    }, signedIn.accessToken), fixture.environment);
+    const exactPage = await fixture.handler(
+      new Request("https://worker.test/v2/sync?cursor=0&limit=2", { headers: bearer(signedIn.accessToken) }),
+      fixture.environment,
+    );
+    expect(exactPage.status).toBe(200);
+    expect(await exactPage.json()).toMatchObject({ hasMore: false });
+  });
 });

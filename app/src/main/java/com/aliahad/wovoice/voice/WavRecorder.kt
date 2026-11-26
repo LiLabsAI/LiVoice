@@ -4,9 +4,13 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Build
 import androidx.core.content.ContextCompat
 import java.io.File
 import java.io.RandomAccessFile
@@ -35,7 +39,8 @@ class WavRecorder(
 
     private val running = AtomicBoolean(false)
     private val keepFile = AtomicBoolean(true)
-    private var audioRecord: AudioRecord? = null
+    private val recordLock = Any()
+    @Volatile private var audioRecord: AudioRecord? = null
     private var thread: Thread? = null
 
     fun start() {
@@ -46,45 +51,67 @@ class WavRecorder(
     fun finish() {
         keepFile.set(true)
         running.set(false)
-        audioRecord?.stopSafely()
+        synchronized(recordLock) {
+            audioRecord?.stopSafely()
+        }
     }
 
     fun cancel() {
         keepFile.set(false)
         running.set(false)
-        audioRecord?.stopSafely()
+        synchronized(recordLock) {
+            audioRecord?.stopSafely()
+        }
     }
 
     @SuppressLint("MissingPermission")
     private fun recordLoop() {
+        if (!running.get()) return
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             running.set(false)
-            callback.onError("Microphone permission is required.")
+            if (keepFile.get()) callback.onError("Microphone permission is required.")
             return
         }
         val minBuffer = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL, ENCODING)
         if (minBuffer <= 0) {
             running.set(false)
-            callback.onError("The microphone could not be opened.")
+            if (keepFile.get()) callback.onError("The microphone could not be opened.")
             return
         }
+        val focusHandle = requestAudioFocus()
         val recorder = createStartedRecorder(maxOf(minBuffer * 2, 4_096))
         if (recorder == null) {
+            abandonAudioFocus(focusHandle)
             running.set(false)
-            callback.onError("The microphone is busy or unavailable.")
+            if (keepFile.get()) callback.onError("The microphone is busy or unavailable.")
             return
         }
-        audioRecord = recorder
+        val stillRunning = synchronized(recordLock) {
+            if (!running.get()) {
+                recorder.stopSafely()
+                runCatching { recorder.release() }
+                false
+            } else {
+                audioRecord = recorder
+                true
+            }
+        }
+        if (!stillRunning) {
+            abandonAudioFocus(focusHandle)
+            return
+        }
 
         var dataBytes = 0L
         var readFailures = 0
         val speechDetector = SpeechSignalDetector(SAMPLE_RATE)
         val buffer = ShortArray(maxOf(minBuffer / 2, 1_024))
+        // Single reusable PCM scratch buffer avoids per-iteration heap churn.
+        val pcm = ByteArray(buffer.size * 2)
         try {
             RandomAccessFile(file, "rw").use { output ->
                 output.setLength(0)
                 output.write(ByteArray(WAV_HEADER_BYTES))
-                callback.onStarted()
+                if (running.get()) callback.onStarted()
                 while (running.get() && dataBytes < MAX_DATA_BYTES) {
                     val count = recorder.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
                     if (count <= 0) {
@@ -98,16 +125,15 @@ class WavRecorder(
                         continue
                     }
                     readFailures = 0
-                    val pcm = ByteArray(count * 2)
                     for (index in 0 until count) {
                         val sample = buffer[index].toInt()
                         pcm[index * 2] = (sample and 0xff).toByte()
                         pcm[index * 2 + 1] = ((sample ushr 8) and 0xff).toByte()
                     }
-                    output.write(pcm)
+                    output.write(pcm, 0, count * 2)
                     val rms = speechDetector.observe(buffer, count)
                     dataBytes += count * 2L
-                    callback.onLevel(rms)
+                    if (running.get()) callback.onLevel(rms)
                 }
                 writeHeader(output, dataBytes)
             }
@@ -135,9 +161,56 @@ class WavRecorder(
             if (keepFile.get()) callback.onError("Recording stopped unexpectedly.")
         } finally {
             running.set(false)
-            recorder.stopSafely()
-            recorder.release()
-            audioRecord = null
+            synchronized(recordLock) {
+                audioRecord = null
+                recorder.stopSafely()
+                runCatching { recorder.release() }
+            }
+            abandonAudioFocus(focusHandle)
+        }
+    }
+
+    private class AudioFocusHandle(
+        val manager: AudioManager,
+        val request: Any?,
+        val listener: AudioManager.OnAudioFocusChangeListener,
+    )
+
+    private fun requestAudioFocus(): AudioFocusHandle? = runCatching {
+        val manager = context.getSystemService(AudioManager::class.java) ?: return null
+        val listener = AudioManager.OnAudioFocusChangeListener { /* Transient dictation focus */ }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build(),
+                )
+                .setOnAudioFocusChangeListener(listener)
+                .build()
+            manager.requestAudioFocus(request)
+            AudioFocusHandle(manager, request, listener)
+        } else {
+            @Suppress("DEPRECATION")
+            manager.requestAudioFocus(
+                listener,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE,
+            )
+            AudioFocusHandle(manager, null, listener)
+        }
+    }.getOrNull()
+
+    private fun abandonAudioFocus(handle: AudioFocusHandle?) {
+        handle ?: return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                (handle.request as? AudioFocusRequest)?.let { handle.manager.abandonAudioFocusRequest(it) }
+            } else {
+                @Suppress("DEPRECATION")
+                handle.manager.abandonAudioFocus(handle.listener)
+            }
         }
     }
 
@@ -205,13 +278,14 @@ class WavRecorder(
         write((value ushr 24) and 0xff)
     }
 
-    private companion object {
-        const val SAMPLE_RATE = 16_000
-        const val CHANNEL = AudioFormat.CHANNEL_IN_MONO
-        const val ENCODING = AudioFormat.ENCODING_PCM_16BIT
-        const val WAV_HEADER_BYTES = 44
-        const val BYTES_PER_SECOND = SAMPLE_RATE * 2
-        const val MAX_DATA_BYTES = BYTES_PER_SECOND * 60L
-        const val MAX_CONSECUTIVE_READ_FAILURES = 10
+    companion object {
+        const val MAX_DURATION_MS = 60_000L
+        private const val SAMPLE_RATE = 16_000
+        private const val CHANNEL = AudioFormat.CHANNEL_IN_MONO
+        private const val ENCODING = AudioFormat.ENCODING_PCM_16BIT
+        private const val WAV_HEADER_BYTES = 44
+        private const val BYTES_PER_SECOND = SAMPLE_RATE * 2
+        private const val MAX_DATA_BYTES = BYTES_PER_SECOND * (MAX_DURATION_MS / 1_000L)
+        private const val MAX_CONSECUTIVE_READ_FAILURES = 10
     }
 }

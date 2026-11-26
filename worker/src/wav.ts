@@ -24,15 +24,19 @@ export async function readBodyLimited(
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > limit) {
-      await reader.cancel();
-      throw new ApiError(413, "PAYLOAD_TOO_LARGE", false, "The recording is too large.");
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) {
+        await reader.cancel();
+        throw new ApiError(413, "PAYLOAD_TOO_LARGE", false, "The recording is too large.");
+      }
+      chunks.push(value);
     }
-    chunks.push(value);
+  } finally {
+    reader.releaseLock();
   }
 
   const body = new Uint8Array(total);
@@ -54,37 +58,57 @@ export function validateWav(audio: ArrayBuffer): WavInfo {
   if (ascii(bytes, 0, 4) !== "RIFF" || ascii(bytes, 8, 4) !== "WAVE") {
     throw new ApiError(400, "INVALID_AUDIO", false, "Only a PCM WAV recording is accepted.");
   }
+  const riffSize = view.getUint32(4, true);
+  if (riffSize < 36 || riffSize > bytes.byteLength - 8) {
+    throw new ApiError(400, "INVALID_AUDIO", false, "The WAV recording header is invalid.");
+  }
+  const riffEnd = 8 + riffSize;
 
   let offset = 12;
-  let format: { code: number; channels: number; rate: number; bits: number } | undefined;
+  let format:
+    | { code: number; channels: number; rate: number; byteRate: number; blockAlign: number; bits: number }
+    | undefined;
   let dataBytes = 0;
-  while (offset + 8 <= bytes.byteLength) {
+  while (offset + 8 <= riffEnd) {
     const id = ascii(bytes, offset, 4);
     const size = view.getUint32(offset + 4, true);
     const dataOffset = offset + 8;
-    if (dataOffset + size > bytes.byteLength) {
+    if (dataOffset + size > riffEnd) {
       throw new ApiError(400, "INVALID_AUDIO", false, "The WAV recording is incomplete.");
     }
-    if (id === "fmt " && size >= 16) {
+    if (id === "fmt ") {
+      if (format || size < 16) {
+        throw new ApiError(400, "INVALID_AUDIO", false, "The WAV recording format header is invalid.");
+      }
       format = {
         code: view.getUint16(dataOffset, true),
         channels: view.getUint16(dataOffset + 2, true),
         rate: view.getUint32(dataOffset + 4, true),
+        byteRate: view.getUint32(dataOffset + 8, true),
+        blockAlign: view.getUint16(dataOffset + 12, true),
         bits: view.getUint16(dataOffset + 14, true),
       };
     } else if (id === "data") {
+      if (size % 2 !== 0) {
+        throw new ApiError(400, "INVALID_AUDIO", false, "The WAV recording data is misaligned.");
+      }
       dataBytes += size;
     }
     offset = dataOffset + size + (size % 2);
   }
 
+  const expectedBlockAlign = format ? format.channels * (format.bits / 8) : 0;
+  const expectedByteRate = format ? format.rate * expectedBlockAlign : 0;
   if (
     !format ||
     format.code !== 1 ||
     format.channels !== 1 ||
     format.rate !== EXPECTED_SAMPLE_RATE ||
     format.bits !== 16 ||
-    dataBytes === 0
+    format.blockAlign !== expectedBlockAlign ||
+    format.byteRate !== expectedByteRate ||
+    dataBytes === 0 ||
+    dataBytes % 2 !== 0
   ) {
     throw new ApiError(
       400,

@@ -97,7 +97,7 @@ public struct CloudSettings: Codable, Sendable, Equatable {
     public var historySyncEnabled: Bool
     public var historyRetentionDays: Int?
     public var legacyVault: Bool
-    public init(historySyncEnabled: Bool = false, historyRetentionDays: Int? = nil, legacyVault: Bool = false) {
+    public init(historySyncEnabled: Bool = true, historyRetentionDays: Int? = nil, legacyVault: Bool = false) {
         self.historySyncEnabled = historySyncEnabled; self.historyRetentionDays = historyRetentionDays; self.legacyVault = legacyVault
     }
 }
@@ -145,8 +145,20 @@ public enum RecordPayload {
         if let usage = result.usage { for (key, value) in usage { p[key] = value } }
         return p
     }
+    public static func cleanDictionaryTerm(_ raw: String) -> (term: String, normalized: String)? {
+        guard !raw.contains("\n"), !raw.contains("\r") else { return nil }
+        let collapsed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        guard (2...80).contains(collapsed.utf16.count) else { return nil }
+        let normalized = collapsed.precomposedStringWithCompatibilityMapping.lowercased()
+        return (collapsed, normalized)
+    }
     public static func dictionary(_ term: String, status: String = "confirmed", source: String = "manual", now: Date = .now) -> Payload {
-        ["schemaVersion": .number(1), "term": .string(term), "normalizedTerm": .string(term.lowercased()),
+        let cleaned = cleanDictionaryTerm(term)
+        let display = cleaned?.term ?? term.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = cleaned?.normalized ?? display.precomposedStringWithCompatibilityMapping.lowercased()
+        return ["schemaVersion": .number(1), "term": .string(display), "normalizedTerm": .string(normalized),
          "status": .string(status), "source": .string(source), "createdAtMs": .number(now.timeIntervalSince1970 * 1000),
          "lastUsedAtMs": .number(0), "useCount": .number(0)]
     }

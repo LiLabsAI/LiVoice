@@ -1,51 +1,57 @@
 package com.aliahad.wovoice.ime
 
 import android.Manifest
-import android.inputmethodservice.InputMethodService
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.inputmethodservice.InputMethodService
+import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputMethodManager
 import androidx.core.content.ContextCompat
-import com.aliahad.wovoice.core.DeletePolicy
+import com.aliahad.wovoice.BuildConfig
+import com.aliahad.wovoice.account.AccountResult
+import com.aliahad.wovoice.account.SessionManager
+import com.aliahad.wovoice.bubble.BubbleRetryWindow
+import com.aliahad.wovoice.context.ContextCapture
+import com.aliahad.wovoice.context.DictationContext
 import com.aliahad.wovoice.core.CorrectionLearning
+import com.aliahad.wovoice.core.DeletePolicy
 import com.aliahad.wovoice.core.EditorPolicy
 import com.aliahad.wovoice.core.EditorSessionGuard
 import com.aliahad.wovoice.core.KeyboardState
 import com.aliahad.wovoice.core.TextCommitPolicy
-import com.aliahad.wovoice.context.ContextCapture
-import com.aliahad.wovoice.network.TranscriptionClient
-import com.aliahad.wovoice.account.AccountResult
-import com.aliahad.wovoice.account.SessionManager
 import com.aliahad.wovoice.data.AndroidGraph
-import com.aliahad.wovoice.data.WoVoiceRepository
+import com.aliahad.wovoice.network.TranscriptionClient
 import com.aliahad.wovoice.settings.SecretStore
 import com.aliahad.wovoice.settings.SettingsStore
 import com.aliahad.wovoice.settings.SetupActivity
 import com.aliahad.wovoice.settings.androidDeviceName
-import com.aliahad.wovoice.sync.SyncCoordinator
+import com.aliahad.wovoice.sync.SyncResult
 import com.aliahad.wovoice.voice.VoiceCaptureService
 import com.aliahad.wovoice.voice.WavRecorder
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
-import android.os.SystemClock
 
 class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.Listener,
     VoiceCaptureService.Listener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val backgroundSyncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val sessions = EditorSessionGuard()
     private val client = TranscriptionClient()
     private lateinit var settings: SettingsStore
@@ -59,7 +65,10 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
     private var contextCapture: ContextCapture? = null
     private var captureOwner: String? = null
     private var networkJob: Job? = null
+    private var correctionJob: Job? = null
+    private var retryExpiryJob: Job? = null
     private var activeFile: File? = null
+    private var pendingRetry: PendingRetry? = null
     private var captureBinder: VoiceCaptureService.LocalBinder? = null
     private var pendingCapture = false
     private var bound = false
@@ -76,6 +85,13 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
 
         override fun onServiceDisconnected(name: ComponentName?) {
             captureBinder = null
+            bound = false
+            if (state is KeyboardState.Recording) showError("The recorder disconnected. Tap to try again.")
+        }
+
+        override fun onBindingDied(name: ComponentName?) {
+            captureBinder = null
+            bound = false
             if (state is KeyboardState.Recording) showError("The recorder disconnected. Tap to try again.")
         }
     }
@@ -84,11 +100,22 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
         super.onCreate()
         settings = SettingsStore(this)
         account = SessionManager.get(settings, SecretStore(this), { settings.workerUrl }, ::androidDeviceName)
-        bound = bindService(
-            Intent(this, VoiceCaptureService::class.java),
-            serviceConnection,
-            Context.BIND_AUTO_CREATE,
-        )
+        ensureCaptureServiceBound()
+    }
+
+    private fun ensureCaptureServiceBound() {
+        if (bound && captureBinder != null) return
+        if (bound) {
+            runCatching { unbindService(serviceConnection) }
+            bound = false
+        }
+        bound = runCatching {
+            bindService(
+                Intent(this, VoiceCaptureService::class.java),
+                serviceConnection,
+                Context.BIND_AUTO_CREATE,
+            )
+        }.getOrDefault(false)
     }
 
     override fun onCreateInputView(): View {
@@ -108,7 +135,7 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
         super.onStartInput(attribute, restarting)
         cancelActiveWork()
         currentSession = sessions.begin()
-        pendingCorrection = null
+        clearPendingCorrection()
         state = if (EditorPolicy.isSensitive(attribute?.inputType ?: 0)) {
             KeyboardState.ManualKeyboard
         } else {
@@ -126,7 +153,7 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
-        pendingCorrection = null
+        clearPendingCorrection()
         cancelActiveWork()
         discardTransientState()
         sessions.invalidate()
@@ -134,7 +161,7 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
     }
 
     override fun onFinishInput() {
-        pendingCorrection = null
+        clearPendingCorrection()
         cancelActiveWork()
         discardTransientState()
         sessions.invalidate()
@@ -142,7 +169,7 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
     }
 
     override fun onWindowHidden() {
-        pendingCorrection = null
+        clearPendingCorrection()
         cancelActiveWork()
         discardTransientState()
         sessions.invalidate()
@@ -150,10 +177,12 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
     }
 
     override fun onDestroy() {
+        clearPendingCorrection()
         cancelActiveWork()
         if (bound) runCatching { unbindService(serviceConnection) }
         bound = false
         scope.cancel()
+        backgroundSyncScope.cancel()
         super.onDestroy()
     }
 
@@ -179,7 +208,37 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
             )
             return
         }
+
+        // If a transient transcription failure retained the recent audio file inside
+        // the retry window, retry uploading it instead of forcing the user to re-speak.
+        val retry = pendingRetry
+        val now = SystemClock.elapsedRealtime()
+        if (retry != null &&
+            retry.session == currentSession &&
+            retry.owner == settings.accountId &&
+            retry.file.exists() &&
+            retry.window.allowsRetry(now, true)
+        ) {
+            retryExpiryJob?.cancel()
+            retryExpiryJob = null
+            pendingRetry = retry.copy(window = retry.window.nextAttempt())
+            captureSession = retry.session
+            sentenceStartForCapture = retry.sentenceStart
+            captureOwner = retry.owner
+            activeFile = retry.file
+            state = KeyboardState.Processing
+            keyboard?.setState(state)
+            transcribe(
+                file = retry.file,
+                session = retry.session,
+                audioDurationMs = retry.durationMs,
+                preCapturedContext = retry.capturedContext,
+            )
+            return
+        }
+
         cancelActiveWork(resetState = false)
+        ensureCaptureServiceBound()
         captureSession = currentSession
         sentenceStartForCapture = TextCommitPolicy.isSentenceStartAfter(textBeforeCursor())
         captureOwner = settings.accountId
@@ -188,8 +247,12 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
         state = KeyboardState.Recording
         keyboard?.setState(state)
         try {
-            ContextCompat.startForegroundService(this, Intent(this, VoiceCaptureService::class.java))
-            if (captureBinder == null) pendingCapture = true else beginBoundCapture()
+            if (captureBinder == null) {
+                pendingCapture = true
+                if (!bound) showError("The microphone could not start. Open LiVoice settings and try again.")
+            } else {
+                beginBoundCapture()
+            }
         } catch (_: Exception) {
             showError("The microphone could not start. Open LiVoice settings and try again.")
         }
@@ -238,16 +301,20 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
             connection.commitText("", 1)
             return
         }
-        if (!connection.deleteSurroundingTextInCodePoints(1, 0)) {
-            val before = connection.getTextBeforeCursor(2, 0) ?: return
-            val units = DeletePolicy.utf16UnitsForLastCodePoint(before)
-            if (units > 0) connection.deleteSurroundingText(units, 0)
+        val before = connection.getTextBeforeCursor(DELETE_LOOKBACK_CHARS, 0)
+        if (!before.isNullOrEmpty()) {
+            val units = DeletePolicy.utf16UnitsForLastGrapheme(before)
+            if (units > 0) {
+                connection.deleteSurroundingText(units, 0)
+                return
+            }
         }
+        connection.deleteSurroundingTextInCodePoints(1, 0)
     }
 
     override fun onEditorAction() {
         val connection = currentInputConnection ?: return
-        val action = (currentInputEditorInfo?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
+        val action = EditorPolicy.effectiveAction(currentInputEditorInfo)
         if (action in setOf(
                 EditorInfo.IME_ACTION_GO,
                 EditorInfo.IME_ACTION_NEXT,
@@ -263,7 +330,20 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
     }
 
     override fun onOpenSettings() {
-        startActivity(Intent(this, SetupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        runCatching {
+            startActivity(Intent(this, SetupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+
+    override fun onSwitchToNextIme() {
+        val switched = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            runCatching { switchToNextInputMethod(false) }.getOrDefault(false)
+        } else {
+            false
+        }
+        if (!switched) {
+            runCatching { getSystemService(InputMethodManager::class.java)?.showInputMethodPicker() }
+        }
     }
 
     override fun onRecordingStarted() {
@@ -275,12 +355,14 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
     }
 
     override fun onRecordingComplete(result: WavRecorder.RecordingResult) {
-        Log.i(
-            CAPTURE_LOG_TAG,
-            "durationMs=${result.durationMs} activeMs=${result.activeSpeechMs} " +
-                "averageRms=${result.averageRms} peakRms=${result.peakRms} " +
-                "accepted=${result.containsSpeech}",
-        )
+        if (BuildConfig.DEBUG) {
+            Log.i(
+                CAPTURE_LOG_TAG,
+                "durationMs=${result.durationMs} activeMs=${result.activeSpeechMs} " +
+                    "averageRms=${result.averageRms} peakRms=${result.peakRms} " +
+                    "accepted=${result.containsSpeech}",
+            )
+        }
         if (!isCaptureActive() && state !is KeyboardState.Processing) {
             result.file.delete()
             return
@@ -307,17 +389,37 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
     private fun beginBoundCapture() {
         if (state !is KeyboardState.Recording || !sessions.isActive(captureSession)) return
         val started = captureBinder?.startCapture(this) == true
-        if (!started) showError("The microphone is already in use.")
+        if (!started) {
+            showError("The microphone could not start. Open LiVoice settings and try again.")
+            return
+        }
+        runCatching {
+            ContextCompat.startForegroundService(
+                this,
+                Intent(this, VoiceCaptureService::class.java)
+                    .putExtra(VoiceCaptureService.EXTRA_FOREGROUND_REQUEST, true),
+            )
+        }
     }
 
-    private fun transcribe(file: File, session: Long, audioDurationMs: Long) {
+    private fun transcribe(
+        file: File,
+        session: Long,
+        audioDurationMs: Long,
+        preCapturedContext: DictationContext? = null,
+    ) {
         val workerUrl = settings.workerUrl
+        val locale = settings.locale
+        val polish = settings.polish
         networkJob?.cancel()
         val capture = contextCapture
         val owner = captureOwner
         networkJob = scope.launch {
+            var resolvedContext = preCapturedContext
             try {
-                val capturedContext = capture?.snapshot(settings)
+                if (resolvedContext == null) {
+                    resolvedContext = capture?.snapshot(settings)
+                }
                 if (!sessions.isActive(session) || session != currentSession) return@launch
                 if (owner != settings.accountId) { showError("Account changed. Speak again."); return@launch }
                 val result = withContext(Dispatchers.IO) {
@@ -328,18 +430,29 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
                     } else {
                         val token = (auth as AccountResult.Success).value
                         if (owner != settings.accountId) return@withContext TranscriptionClient.Result.Error("Account changed. Speak again.", false)
-                        val first = client.transcribe(workerUrl, token, file, sentenceStartForCapture, glossary, capturedContext?.restricted(settings.contextLevel))
+                        val first = client.transcribe(
+                            baseUrl = workerUrl,
+                            token = token,
+                            audioFile = file,
+                            sentenceStart = sentenceStartForCapture,
+                            glossary = glossary,
+                            context = resolvedContext?.restricted(settings.contextLevel),
+                            locale = locale,
+                            polish = polish,
+                        )
                         if (first is TranscriptionClient.Result.Error &&
                             (first.code == "TOKEN_EXPIRED" || first.code == "AUTH_REQUIRED")
                         ) {
                             when (val refreshed = account.refreshAfterRejected(token)) {
                                 is AccountResult.Success -> if (owner != settings.accountId) TranscriptionClient.Result.Error("Account changed. Speak again.", false) else client.transcribe(
-                                    workerUrl,
-                                    refreshed.value,
-                                    file,
-                                    sentenceStartForCapture,
-                                    glossary,
-                                    capturedContext?.restricted(settings.contextLevel),
+                                    baseUrl = workerUrl,
+                                    token = refreshed.value,
+                                    audioFile = file,
+                                    sentenceStart = sentenceStartForCapture,
+                                    glossary = glossary,
+                                    context = resolvedContext?.restricted(settings.contextLevel),
+                                    locale = locale,
+                                    polish = polish,
                                 )
                                 is AccountResult.Error -> TranscriptionClient.Result.Error(
                                     refreshed.message,
@@ -361,27 +474,19 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
                 }
                 when (result) {
                     is TranscriptionClient.Result.Success -> {
-                        val profile = withContext(Dispatchers.IO) { account.loadProfile() }
-                        if (!sessions.isActive(session) || session != currentSession) return@launch
-                        if (owner != settings.accountId) { showError("Account changed. Speak again."); return@launch }
-                        if (!isInputViewShown) {
-                            discardTransientState()
-                            return@launch
-                        }
-                        when {
-                            profile !is AccountResult.Success -> showError(
-                                "LiVoice could not confirm your account status. The text was not inserted; tap to try again.",
-                            )
-                            account.cloudServicesAllowed -> commitFinalText(result, audioDurationMs)
-                            else -> showError(
-                                account.accountStatus.publicMessage
-                                    ?: "This account cannot insert cloud speech right now.",
-                            )
-                        }
+                        clearPendingRetry()
+                        // Insert immediately — the Worker already verified account standing
+                        // and billed quota, so an extra /v1/me RTT must never discard speech.
+                        commitFinalText(result, audioDurationMs)
                     }
                     is TranscriptionClient.Result.Error -> {
                         if (result.code == "ACCOUNT_SUSPENDED" || result.code == "ACCOUNT_BANNED") {
                             account.markRestricted(result.code, result.message)
+                            clearPendingRetry()
+                        } else if (offerRetry(file, audioDurationMs, session, owner, resolvedContext, result)) {
+                            return@launch
+                        } else {
+                            clearPendingRetry()
                         }
                         showError(
                             account.accountStatus.publicMessage?.takeIf {
@@ -390,13 +495,62 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
                         )
                     }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } finally {
                 capture?.cancel()
                 if (contextCapture === capture) contextCapture = null
-                file.delete()
-                if (activeFile == file) activeFile = null
+                val retained = pendingRetry?.file == file && sessions.isActive(session) && session == currentSession
+                if (!retained) {
+                    file.delete()
+                    if (activeFile == file) activeFile = null
+                }
             }
         }
+    }
+
+    private fun offerRetry(
+        file: File,
+        durationMs: Long,
+        session: Long,
+        owner: String?,
+        capturedContext: DictationContext?,
+        error: TranscriptionClient.Result.Error,
+    ): Boolean {
+        if (!error.retryable || error.code == "EMPTY_RESULT" || error.code == "CANCELLED") return false
+        val now = SystemClock.elapsedRealtime()
+        val window = pendingRetry?.takeIf { it.file == file }?.window ?: BubbleRetryWindow.afterFirstFailure(now)
+        if (!window.allowsRetry(now, true) || !file.exists()) return false
+        pendingRetry = PendingRetry(
+            file = file,
+            durationMs = durationMs,
+            session = session,
+            sentenceStart = sentenceStartForCapture,
+            owner = owner,
+            capturedContext = capturedContext,
+            window = window,
+        )
+        retryExpiryJob?.cancel()
+        retryExpiryJob = scope.launch {
+            delay((window.expiresAtMs - now).coerceAtLeast(1L))
+            if (pendingRetry?.file == file) {
+                clearPendingRetry()
+                if (state is KeyboardState.Error) {
+                    showError("Recording expired. Tap mic to speak again.")
+                }
+            }
+        }
+        showError("Connection failed. Tap mic to retry.")
+        return true
+    }
+
+    private fun clearPendingRetry() {
+        retryExpiryJob?.cancel()
+        retryExpiryJob = null
+        val stale = pendingRetry
+        pendingRetry = null
+        stale?.file?.delete()
+        if (activeFile == stale?.file) activeFile = null
     }
 
     private fun commitFinalText(result: TranscriptionClient.Result.Success, audioDurationMs: Long) {
@@ -409,7 +563,7 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
         val committed = text.isNotEmpty() && connection.commitText(text, 1)
         if (committed) {
             val analyticsSyncId = UUID.randomUUID().toString()
-            scope.launch(Dispatchers.IO) {
+            backgroundSyncScope.launch {
                 repository.recordSuccessfulDictation(
                     result = result,
                     committedText = result.text,
@@ -417,7 +571,13 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
                     keepHistory = settings.historyEnabled,
                     analyticsSyncId = analyticsSyncId,
                 )
-                if (account.cloudServicesAllowed) AndroidGraph.sync(this@WoVoiceInputMethodService).syncNow()
+                account.loadProfile()
+                if (account.cloudServicesAllowed) {
+                    val synced = AndroidGraph.sync(this@WoVoiceInputMethodService).syncNow()
+                    if (synced is SyncResult.Success) {
+                        settings.syncWarning = synced.warning
+                    }
+                }
             }
             if (settings.learningSuggestionsEnabled && EditorPolicy.allowsLearning(currentInputEditorInfo)) {
                 pendingCorrection = PendingCorrection(
@@ -450,16 +610,45 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
             SystemClock.uptimeMillis() - pending.createdAtUptimeMs > CORRECTION_WINDOW_MS ||
             newSelStart != newSelEnd
         ) {
-            pendingCorrection = null
+            clearPendingCorrection()
+            return
+        }
+        // Debounce correction inspection so deleting a single character doesn't
+        // learn half-deleted typos before the user finishes retyping the word.
+        correctionJob?.cancel()
+        val tailChar = currentInputConnection?.getTextBeforeCursor(1, 0)?.lastOrNull()
+        val wordBoundaryCompleted = tailChar != null && tailChar in WORD_BOUNDARY_CHARS && newSelStart > oldSelStart
+        correctionJob = scope.launch {
+            if (!wordBoundaryCompleted) delay(CORRECTION_DEBOUNCE_MS)
+            evaluatePendingCorrection(pending)
+        }
+    }
+
+    private fun evaluatePendingCorrection(pending: PendingCorrection) {
+        if (pendingCorrection !== pending) return
+        if (
+            !settings.learningSuggestionsEnabled ||
+            !EditorPolicy.allowsLearning(currentInputEditorInfo) ||
+            pending.session != currentSession ||
+            !sessions.isActive(pending.session) ||
+            SystemClock.uptimeMillis() - pending.createdAtUptimeMs > CORRECTION_WINDOW_MS
+        ) {
+            clearPendingCorrection()
             return
         }
         val tailLength = (pending.generatedText.length + 64).coerceAtMost(MAX_CORRECTION_WINDOW_CHARS)
         val tail = currentInputConnection?.getTextBeforeCursor(tailLength, 0)?.toString() ?: return
         val suggestion = CorrectionLearning.suggestion(pending.generatedText, tail) ?: return
-        pendingCorrection = null
-        scope.launch(Dispatchers.IO) {
+        clearPendingCorrection()
+        backgroundSyncScope.launch {
             if (repository.addSuggestion(suggestion)) repository.noteCorrection(pending.analyticsSyncId)
         }
+    }
+
+    private fun clearPendingCorrection() {
+        correctionJob?.cancel()
+        correctionJob = null
+        pendingCorrection = null
     }
 
     private fun configureForEditor(info: EditorInfo?) {
@@ -482,7 +671,7 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
             (state is KeyboardState.Recording || state is KeyboardState.Processing)
 
     private fun showError(message: String) {
-        state = KeyboardState.Error(message.take(100))
+        state = KeyboardState.Error(truncateAtWord(message, MAX_ERROR_CHARS))
         keyboard?.setState(state)
     }
 
@@ -506,6 +695,7 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
         contextCapture?.cancel()
         contextCapture = null
         client.cancel()
+        clearPendingRetry()
         activeFile?.delete()
         activeFile = null
         if (resetState) {
@@ -514,11 +704,23 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
         }
     }
 
+    private fun truncateAtWord(message: String, maxChars: Int): String {
+        val clean = message.trim()
+        if (clean.length <= maxChars) return clean
+        val boundary = clean.lastIndexOf(' ', maxChars - 1)
+        val cut = if (boundary >= maxChars / 2) clean.substring(0, boundary) else clean.substring(0, maxChars - 1)
+        return "${cut.trimEnd('.', ',', ';', ':')}…"
+    }
+
     private companion object {
         const val CAPTURE_LOG_TAG = "WoVoiceCapture"
         const val CORRECTION_WINDOW_MS = 30_000L
+        const val CORRECTION_DEBOUNCE_MS = 1_200L
         const val MAX_CORRECTION_WINDOW_CHARS = 256
         const val SENTENCE_LOOKBACK_CHARS = 16
+        const val DELETE_LOOKBACK_CHARS = 32
+        const val MAX_ERROR_CHARS = 120
+        val WORD_BOUNDARY_CHARS = setOf(' ', '.', ',', '!', '?', ';', ':', '\n')
     }
 
     private data class PendingCorrection(
@@ -526,5 +728,15 @@ class WoVoiceInputMethodService : InputMethodService(), WoVoiceKeyboardView.List
         val generatedText: String,
         val createdAtUptimeMs: Long,
         val analyticsSyncId: String,
+    )
+
+    private data class PendingRetry(
+        val file: File,
+        val durationMs: Long,
+        val session: Long,
+        val sentenceStart: Boolean,
+        val owner: String?,
+        val capturedContext: DictationContext?,
+        val window: BubbleRetryWindow,
     )
 }

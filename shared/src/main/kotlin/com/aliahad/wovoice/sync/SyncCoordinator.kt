@@ -8,6 +8,7 @@ import com.aliahad.wovoice.account.SessionManager
 import com.aliahad.wovoice.account.SyncAccount
 import com.aliahad.wovoice.data.AnalyticsSyncEvent
 import com.aliahad.wovoice.data.DailyUsageAggregate
+import com.aliahad.wovoice.data.DeletionHold
 import com.aliahad.wovoice.data.DictationRecord
 import com.aliahad.wovoice.data.DictionaryEntry
 import com.aliahad.wovoice.data.EncryptedSyncOutboxItem
@@ -16,8 +17,12 @@ import com.aliahad.wovoice.data.SYNC_LOCAL
 import com.aliahad.wovoice.data.SYNC_QUEUED
 import com.aliahad.wovoice.data.WoVoiceDao
 import com.aliahad.wovoice.data.analyticsDateKey
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 sealed interface SyncResult {
@@ -42,6 +47,9 @@ class SyncCoordinator internal constructor(
     private val settings: AccountSettings,
     private val dao: WoVoiceDao,
     private val clock: () -> Long = System::currentTimeMillis,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val deletionHold: DeletionHold = DeletionHold.Shared,
+    private val maxPushRounds: Int = MAX_PUSH_ROUNDS,
 ) {
     private val syncMutex = Mutex()
 
@@ -67,17 +75,26 @@ class SyncCoordinator internal constructor(
     private suspend fun syncLocked(): SyncResult {
         if (!account.cloudServicesAllowed) return SyncResult.Error(account.restrictionMessage, false)
         val accountId = account.accountId ?: return SyncResult.Error("Sign in to sync.", false)
+        // Recover any rows orphaned in 'queued' by a prior process crash or cancellation
+        // before pulling or staging new writes.
+        dao.returnQueuedToLocal(accountId)
+
         val session = when (val auth = account.validAccessToken()) {
             is AccountResult.Success -> Session(auth.value)
             is AccountResult.Error -> return SyncResult.Error(auth.message, auth.retryable)
         }
-        if (settings.cloudSyncMigratedAccount != accountId) {
+        if (!settings.isCloudSyncMigrated(accountId)) {
             importLegacyVault(accountId, session)?.let { return it }
         }
 
         var downloaded = 0
+        var pages = 0
         while (true) {
-            val page = when (val result = session.call { api.pull(it, settings.syncCursor) }) {
+            if (++pages > MAX_PULL_PAGES) {
+                return SyncResult.Error("Sync received too many pages. Please try again.", true)
+            }
+            val previousCursor = settings.syncCursor
+            val page = when (val result = session.call { api.pull(it, previousCursor) }) {
                 is AccountResult.Success -> result.value
                 is AccountResult.Error -> return SyncResult.Error(result.message, result.retryable)
             }
@@ -88,8 +105,14 @@ class SyncCoordinator internal constructor(
                 // One record that cannot be applied must not stall the feed.
                 if (runCatching { applyRecord(accountId, record, force = false) }.getOrDefault(false)) downloaded++
             }
-            settings.syncCursor = page.nextCursor
+            applyCachedRetention(accountId)
+            if (page.nextCursor > previousCursor) {
+                settings.syncCursor = page.nextCursor
+            }
             if (!page.hasMore) break
+            if (page.nextCursor <= previousCursor) {
+                return SyncResult.Error("Sync feed did not advance. Please try again later.", true)
+            }
         }
 
         val pushed = pushLocal(accountId, session)
@@ -113,46 +136,74 @@ class SyncCoordinator internal constructor(
         var conflictRounds = 0
         var skipNewTerms = false
         var warning: String? = null
-        repeat(MAX_PUSH_ROUNDS) {
-            val batch = stageBatch(accountId, skipNewTerms)
-            if (batch.writes.isEmpty()) return SyncResult.Success(uploaded, 0, warning)
-            when (val result = session.call { api.push(it, batch.writes) }) {
-                is AccountResult.Success -> {
-                    result.value.forEach { applied -> settlePushed(accountId, batch, applied) }
-                    uploaded += result.value.size
-                }
-                is AccountResult.Error -> {
-                    // The whole batch was refused: every staged row goes back to 'local'.
-                    dao.returnQueuedToLocal(accountId)
-                    when (result.code) {
-                        "SYNC_CONFLICT" -> {
-                            val conflicts = api.conflicts(result)
-                            if (conflicts.isEmpty() || ++conflictRounds > MAX_CONFLICT_ROUNDS) {
-                                return SyncResult.Error("Changes from another device were merged. Sync again to finish.", true)
+        try {
+            repeat(maxPushRounds) {
+                val batch = stageBatch(accountId, skipNewTerms)
+                if (batch.writes.isEmpty()) return SyncResult.Success(uploaded, 0, warning)
+                when (val result = session.call { api.push(it, batch.writes) }) {
+                    is AccountResult.Success -> {
+                        result.value.forEach { applied -> settlePushed(accountId, batch, applied) }
+                        uploaded += result.value.size
+                    }
+                    is AccountResult.Error -> {
+                        // The whole batch was refused: every staged row goes back to 'local'.
+                        dao.returnQueuedToLocal(accountId)
+                        when (result.code) {
+                            "SYNC_CONFLICT" -> {
+                                val conflicts = api.conflicts(result)
+                                if (conflicts.isEmpty() || ++conflictRounds > MAX_CONFLICT_ROUNDS) {
+                                    return SyncResult.Error("Changes from another device were merged. Sync again to finish.", true)
+                                }
+                                conflicts.forEach { reconcile(accountId, it, batch) }
                             }
-                            conflicts.forEach { reconcile(accountId, it, batch) }
+                            "STORAGE_LIMIT_REACHED" -> {
+                                // The dictionary is full: keep syncing everything else.
+                                skipNewTerms = true
+                                warning = result.message
+                            }
+                            "HISTORY_SYNC_DISABLED" -> applyHistorySyncDisabled(accountId)
+                            else -> return SyncResult.Error(result.message, result.retryable)
                         }
-                        "STORAGE_LIMIT_REACHED" -> {
-                            // The dictionary is full: keep syncing everything else.
-                            skipNewTerms = true
-                            warning = result.message
-                        }
-                        "HISTORY_SYNC_DISABLED" -> applyHistorySyncDisabled(accountId)
-                        else -> return SyncResult.Error(result.message, result.retryable)
                     }
                 }
             }
+            if (hasPendingWork(accountId, skipNewTerms)) {
+                warning = warning ?: "More changes are waiting to sync. Sync again to finish."
+            }
+            return SyncResult.Success(uploaded, 0, warning)
+        } finally {
+            // NonCancellable guarantees staged rows return to 'local' even when the
+            // calling coroutine is cancelled mid-push.
+            withContext(NonCancellable) {
+                dao.returnQueuedToLocal(accountId)
+            }
         }
-        return SyncResult.Success(uploaded, 0, warning)
+    }
+
+    private suspend fun hasPendingWork(accountId: String, skipNewTerms: Boolean): Boolean {
+        val nowMs = clock()
+        val pendingTombstones = dao.outboxTombstones(accountId, MAX_BATCH).any { item ->
+            (item.recordType != TYPE_HISTORY || settings.historySyncEnabled) &&
+                !deletionHold.isHeld(accountId, item.recordType, item.recordId, nowMs)
+        }
+        if (pendingTombstones) return true
+        if (settings.historySyncEnabled && dao.unsyncedHistory(accountId, 1).isNotEmpty()) return true
+        val dict = if (skipNewTerms) dao.unsyncedExistingDictionary(accountId, 1) else dao.unsyncedDictionary(accountId, 1)
+        if (dict.isNotEmpty()) return true
+        return dao.unsyncedAnalytics(accountId, 1).isNotEmpty()
     }
 
     private suspend fun stageBatch(accountId: String, skipNewTerms: Boolean): Batch {
         val writes = mutableListOf<CloudWrite>()
         val tombstones = mutableMapOf<String, EncryptedSyncOutboxItem>()
+        val nowMs = clock()
         dao.outboxTombstones(accountId, MAX_BATCH).forEach { item ->
             if (item.recordType == TYPE_HISTORY && !settings.historySyncEnabled) {
                 // The account keeps no history in the cloud; there is nothing to delete.
                 dao.deleteOutbox(listOf(item.id))
+                return@forEach
+            }
+            if (deletionHold.isHeld(accountId, item.recordType, item.recordId, nowMs)) {
                 return@forEach
             }
             writes += CloudWrite(item.recordId, item.recordType, item.baseVersion, null)
@@ -168,8 +219,13 @@ class SyncCoordinator internal constructor(
             }
         }
         if (room() > 0) {
-            dao.unsyncedDictionary(accountId, room())
-                .filterNot { queued(TYPE_DICTIONARY, it.syncId) || (skipNewTerms && it.syncVersion == 0) }
+            val candidates = if (skipNewTerms) {
+                dao.unsyncedExistingDictionary(accountId, room())
+            } else {
+                dao.unsyncedDictionary(accountId, room())
+            }
+            candidates
+                .filterNot { queued(TYPE_DICTIONARY, it.syncId) }
                 .forEach { value ->
                     if (value.syncId.isBlank()) return@forEach
                     dao.updateDictionarySync(accountId, value.syncId, SYNC_QUEUED, value.syncVersion)
@@ -178,6 +234,7 @@ class SyncCoordinator internal constructor(
         }
         if (room() > 0) {
             dao.unsyncedAnalytics(accountId, room()).filterNot { queued(TYPE_ANALYTICS, it.syncId) }.forEach { value ->
+                if (value.syncId.isBlank()) return@forEach
                 dao.updateAnalyticsSync(accountId, value.syncId, SYNC_QUEUED, value.syncVersion)
                 writes += CloudWrite(value.syncId, TYPE_ANALYTICS, value.syncVersion, analyticsJson(value))
             }
@@ -232,9 +289,14 @@ class SyncCoordinator internal constructor(
         if (settings.historySyncEnabled && !value.historySyncEnabled) applyHistorySyncDisabled(accountId)
         settings.historySyncEnabled = value.historySyncEnabled
         settings.historyRetentionDays = value.historyRetentionDays
+        applyCachedRetention(accountId)
+    }
+
+    private suspend fun applyCachedRetention(accountId: String) {
         // The server deletes expired cloud history itself; this covers copies that
-        // were never uploaded (or when history sync is off).
-        value.historyRetentionDays?.let { days -> dao.deleteHistoryBefore(accountId, clock() - days * DAY_MS) }
+        // were never uploaded (or when history sync is off) and newly pulled pages.
+        val days = settings.historyRetentionDays?.takeIf { it > 0 } ?: return
+        dao.deleteHistoryBefore(accountId, clock() - days * DAY_MS)
     }
 
     private suspend fun applyHistorySyncDisabled(accountId: String) {
@@ -428,17 +490,33 @@ class SyncCoordinator internal constructor(
         if (vaultKey != null && recovery != null) {
             when (val vault = session.call { legacy.getVault(it) }) {
                 is AccountResult.Success -> {
-                    val unwrapped = vault.value?.let { VaultCrypto.unwrapVaultKey(it, recovery, accountId) }
-                    if (unwrapped != null && unwrapped.contentEquals(vaultKey)) {
+                    val wrapped = vault.value
+                    if (wrapped != null) {
+                        val unwrapped = VaultCrypto.unwrapVaultKey(wrapped, recovery, accountId)
+                        if (unwrapped == null || !unwrapped.contentEquals(vaultKey)) {
+                            // Never wipe local vault secrets or mark migrated when an active
+                            // legacy vault could not be unlocked — preserve keys for retry.
+                            return SyncResult.Error(
+                                "Could not unlock your previous encrypted vault on this device.",
+                                false,
+                            )
+                        }
                         var cursor = 0L
+                        var pages = 0
                         while (true) {
+                            if (++pages > MAX_PULL_PAGES) {
+                                return SyncResult.Error("Legacy vault import exceeded page limit. Please try again.", true)
+                            }
                             val page = when (val result = session.call { legacy.pullLegacy(it, cursor) }) {
                                 is AccountResult.Success -> result.value
                                 is AccountResult.Error -> return SyncResult.Error(result.message, result.retryable)
                             }
                             page.records.forEach { runCatching { importLegacyRecord(accountId, vaultKey, it) } }
-                            cursor = page.nextCursor
                             if (!page.hasMore) break
+                            if (page.nextCursor <= cursor) {
+                                return SyncResult.Error("Legacy vault feed did not advance. Please try again later.", true)
+                            }
+                            cursor = page.nextCursor
                         }
                         imported = true
                     }
@@ -459,7 +537,7 @@ class SyncCoordinator internal constructor(
         settings.syncCursor = 0
         secrets.remove(SecretNames.VAULT_KEY)
         secrets.remove(SecretNames.RECOVERY_SECRET)
-        settings.cloudSyncMigratedAccount = accountId
+        settings.markCloudSyncMigrated(accountId)
         return null
     }
 
@@ -468,7 +546,7 @@ class SyncCoordinator internal constructor(
             applyRecord(accountId, CloudRecord(record.id, record.type, 0, deleted = true, payload = null), force = true)
             return
         }
-        if (record.keyVersion != LEGACY_KEY_VERSION || record.nonce == null || record.ciphertext == null) return
+        if (record.keyVersion <= 0 || record.nonce == null || record.ciphertext == null) return
         val plaintext = VaultCrypto.decryptRecord(
             vaultKey,
             EncryptedRecord(record.nonce, record.ciphertext),
@@ -496,17 +574,24 @@ class SyncCoordinator internal constructor(
     // ---- Tokens ----
 
     private inner class Session(var token: String) {
-        /** Runs [request]; an expired access token is refreshed once and the request retried. */
+        /** Runs [request] on [ioDispatcher]; an expired access token is refreshed once and retried. */
         suspend fun <T> call(request: (String) -> AccountResult<T>): AccountResult<T> {
-            val first = request(token)
-            if (first !is AccountResult.Error || first.code != "TOKEN_EXPIRED") return first
-            return when (val refreshed = account.refreshAfterRejected(token)) {
-                is AccountResult.Success -> {
-                    token = refreshed.value
-                    request(token)
+            val first = withContext(ioDispatcher) { request(token) }
+            val finalResult = if (first is AccountResult.Error && first.code == "TOKEN_EXPIRED") {
+                when (val refreshed = account.refreshAfterRejected(token)) {
+                    is AccountResult.Success -> {
+                        token = refreshed.value
+                        withContext(ioDispatcher) { request(token) }
+                    }
+                    is AccountResult.Error -> refreshed
                 }
-                is AccountResult.Error -> refreshed
+            } else first
+            if (finalResult is AccountResult.Error &&
+                (finalResult.code == "ACCOUNT_SUSPENDED" || finalResult.code == "ACCOUNT_BANNED")
+            ) {
+                account.markRestricted(finalResult.code, finalResult.message)
             }
+            return finalResult
         }
     }
 
@@ -566,9 +651,9 @@ class SyncCoordinator internal constructor(
         private const val TYPE_DICTIONARY = "dictionary"
         private const val TYPE_ANALYTICS = "analytics"
         private const val SCHEMA_VERSION = 1
-        private const val LEGACY_KEY_VERSION = 1
         private const val LEGACY_SCHEMA_VERSION = 1
         private const val MAX_BATCH = 100
+        internal const val MAX_PULL_PAGES = 100
         // Up to 2,000 uploads per sync; anything beyond waits for the next one.
         private const val MAX_PUSH_ROUNDS = 20
         private const val MAX_CONFLICT_ROUNDS = 3

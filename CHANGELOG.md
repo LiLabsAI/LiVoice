@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.2 — 2026-11-26 (Desktop 1.3.1)
+
+- **Android Background Persistence & HyperOS Reliability:** Added a quiet `START_STICKY` background keep-alive service (`BubbleKeepAliveService`, toggleable in Settings), boot/update/periodic watchdog recovery (`BubbleBootReceiver`, `BubbleHealthJobService`), a 24-hour `ApplicationExitInfo` (`SwipeUpClean`) watchdog, and an interactive **Background reliability setup** checklist with 1-tap HyperOS Autostart, Battery `No restrictions`, Accessibility, Notification, and Recents-lock controls.
+- **Security & Privacy:** Enforced PKCE `codeVerifier` verification on account deletion (`DELETE /v1/me`) across the Worker and all clients, removed debug Android signing certificates from production `assetlinks.json`, hardened Electron sandboxing/preload/entitlements on macOS, added `Cache-Control: no-store` and security headers across Worker API responses, tightened rate limiting, and aligned Accessibility, README, and website privacy copy with optional Automatic Context.
+- **macOS Desktop (1.3.1):** Fixed `Info.plist` `mac.extendInfo` privacy descriptions, added automatic `~/Library/Application Support/WoVoice` -> `LiVoice` upgrade migration, compiled universal (`arm64` + `x86_64`) `tapd` and `contextd` helpers with native `CGEventPost` paste and non-destructive transient clipboard restore, fixed modifier/shortcut misfires and AX `frontmostApplication` staleness, added `context=off` fallback paste for browser/Electron editors, added Light/Dark theme, device session management, account deletion, restriction banners, analytics sync, language/polish/microphone settings, and History export/clear.
+- **Android (1.9.2):** Prevented orphaned `SYNC_QUEUED` records and post-transcription `loadProfile()` drops, fixed `VoiceCaptureService`/`WavRecorder` races and added transient `AudioFocus`, added Keystore AAD binding and main-thread caching in `SecretStore`, added Room schema v3 indices (`MIGRATION_2_3`), fixed `EmojiPanelView` empty-recents bug and ZWJ grapheme deletion, debounced correction learning, added IME retry, Globe/Next-IME switcher, main-row `,`/`.` punctuation, in-place Shift updates, recording timer, language/polish selectors, and History export.
+- **Backend, Admin Portal & Public Web:** Fixed admin monthly email ceiling rollback, moderation email double-send race, `admin_browser_sessions` cascade retention, and `npm run deploy` Admin SPA build; added multi-language and polish-level (`off`/`light`/`strong`) transcription options, enforced the 4,000-character glossary budget across all clients, upgraded `/v1/status` to live component health checks, enabled Workers Traces, added mobile landing navigation and mobile Admin Portal controls, and hardened CI/release workflows.
+
 ## 1.9.1 — 2026-11-24
 
 - Fixed Android floating dictation bubble failing with `"Select a text box first."` in WhatsApp (`MentionableEntry`) and similar custom `EditText` fields that expose placeholder text without setting `hintText` / `isShowingHintText` or node selection offsets.
@@ -30,7 +38,7 @@
 - Improved the keyboard at large accessibility text sizes so mode switches, Finish and Cancel remain reachable. Added descriptive keyboard accessibility labels and Shift/caps-lock state.
 - Fixed an unreadable sign-in button label in dark mode.
 - Fixed a Swift 6 actor-isolation crash when microphone buffers arrive on the realtime audio thread. App restart clears orphaned Live Activities, and expired activities show that the session ended.
-- Fixed dictation in empty text fields and false insertion-success messages when an editor rejects text. Live Activity controls now open WoVoice to stop the microphone reliably.
+- Fixed dictation in empty text fields and false insertion-success messages when an editor rejects text. Live Activity controls now open LiVoice to stop the microphone reliably.
 - Added a native iPhone/iPad workspace with dictation, History, Dictionary, analytics, account settings, device sessions, and existing Cloudflare sync.
 - Added foreground-only shortcut activation, interruption cancellation checks, and accessible layouts for large-text Home and vocabulary controls.
 - Added dedicated voice and typing modes, vocabulary search, and visible confirmation for suggested words. Home puts dictation controls before analytics.

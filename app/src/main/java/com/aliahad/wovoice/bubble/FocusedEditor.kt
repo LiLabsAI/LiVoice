@@ -25,7 +25,8 @@ internal class FocusedEditor private constructor(
     val maxTextLength: Int get() = node.maxTextLength
     val sentenceStart: Boolean = TextCommitPolicy.isSentenceStartAfter(original.take(minOf(start, end)).takeLast(16))
 
-    fun context(level: ContextLevel, style: String): DictationContext? {
+    fun context(level: ContextLevel, style: String, incognito: Boolean = false): DictationContext? {
+        if (incognito || node.isPassword || EditorPolicy.isSensitive(node.inputType)) return null
         if (Build.VERSION.SDK_INT >= 34 && node.isAccessibilityDataSensitive) return null
         val field = ContextCapture.field(node.inputType)
         return ContextPolicy.detect(packageName, (if (Build.VERSION.SDK_INT >= 26) node.hintText?.toString() else null).orEmpty(), field, level, style,

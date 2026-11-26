@@ -3,12 +3,21 @@ package com.aliahad.wovoice.ui
 import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.TextView
+import androidx.core.view.AccessibilityDelegateCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 
 fun Context.dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
+
+fun Context.systemAnimationsEnabled(): Boolean = runCatching {
+    Settings.Global.getFloat(contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) > 0f
+}.getOrDefault(true)
 
 fun rounded(color: Int, radius: Float, strokeColor: Int? = null, strokeWidth: Int = 0): GradientDrawable =
     GradientDrawable().apply {
@@ -27,10 +36,22 @@ fun TextView.styleText(sizeSp: Float, color: Int = Color.WHITE) {
     includeFontPadding = false
 }
 
+fun View.setButtonAccessibilityRole() {
+    ViewCompat.setAccessibilityDelegate(
+        this,
+        object : AccessibilityDelegateCompat() {
+            override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfoCompat) {
+                super.onInitializeAccessibilityNodeInfo(host, info)
+                info.className = Button::class.java.name
+            }
+        },
+    )
+}
+
 fun View.setHorizontalMargins(value: Int) {
     (layoutParams as? ViewGroup.MarginLayoutParams)?.let {
-        it.leftMargin = value
-        it.rightMargin = value
+        it.marginStart = value
+        it.marginEnd = value
         layoutParams = it
     }
 }

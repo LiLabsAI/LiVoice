@@ -39,17 +39,18 @@ export default {
   },
 } satisfies ExportedHandler<AppEnv>;
 
-async function cleanupExpiredCredentials(env: AppEnv): Promise<void> {
-  const now = Date.now();
+export async function cleanupExpiredCredentials(env: AppEnv, now = Date.now()): Promise<void> {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM login_challenges WHERE expires_at < ?").bind(now - 86_400_000),
     env.DB.prepare("DELETE FROM authorization_codes WHERE expires_at < ?").bind(now - 86_400_000),
     env.DB.prepare("DELETE FROM refresh_tokens WHERE expires_at < ?").bind(now - 86_400_000),
-    env.DB.prepare("DELETE FROM sessions WHERE absolute_expires_at < ? OR revoked_at < ?")
+    env.DB.prepare("DELETE FROM sessions WHERE (revoked_at IS NULL AND absolute_expires_at < ?) OR (revoked_at IS NOT NULL AND revoked_at < ?)")
       .bind(now - 86_400_000, now - 30 * 86_400_000),
-    env.DB.prepare("DELETE FROM admin_login_challenges WHERE expires_at < ?").bind(now - 86_400_000),
     env.DB.prepare(
-      "DELETE FROM admin_browser_sessions WHERE absolute_expires_at < ? OR revoked_at < ?",
+      "DELETE FROM admin_browser_sessions WHERE (revoked_at IS NULL AND absolute_expires_at < ?) OR (revoked_at IS NOT NULL AND revoked_at < ?)",
     ).bind(now - 86_400_000, now - 30 * 86_400_000),
+    env.DB.prepare(
+      "DELETE FROM admin_login_challenges WHERE expires_at < ? AND id NOT IN (SELECT challenge_id FROM admin_browser_sessions)",
+    ).bind(now - 86_400_000),
   ]);
 }

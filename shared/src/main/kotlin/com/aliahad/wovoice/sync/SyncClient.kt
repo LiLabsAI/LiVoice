@@ -1,9 +1,12 @@
 package com.aliahad.wovoice.sync
 
 import com.aliahad.wovoice.account.AccountResult
+import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.BufferedInputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
@@ -188,6 +191,7 @@ class SyncClient(private val baseUrlProvider: () -> String) : CloudSyncApi, Lega
         parser: (JSONObject) -> T,
     ): AccountResult<T> {
         var connection: HttpURLConnection? = null
+        var responseStatus = 0
         return try {
             connection = endpoint(path).openConnection() as HttpURLConnection
             connection.requestMethod = method
@@ -202,12 +206,23 @@ class SyncClient(private val baseUrlProvider: () -> String) : CloudSyncApi, Lega
                 connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             }
             val status = connection.responseCode
+            responseStatus = status
             val text = read(connection, status)
             if (status in 200..299) {
                 AccountResult.Success(parser(if (text.isBlank()) JSONObject() else JSONObject(text)))
             } else parseError(text, status)
-        } catch (_: Exception) {
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: ResponseTooLargeException) {
+            AccountResult.Error("INVALID_RESPONSE", "Sync response exceeded the size limit.", false, responseStatus)
+        } catch (_: JSONException) {
+            AccountResult.Error("INVALID_RESPONSE", "Sync received an unreadable response.", false, responseStatus)
+        } catch (_: IllegalArgumentException) {
+            AccountResult.Error("INVALID_REQUEST", "LiVoice has an invalid service address.", false, 0)
+        } catch (_: IOException) {
             AccountResult.Error("NETWORK_UNAVAILABLE", "Sync could not reach LiVoice.", true, 0)
+        } catch (_: Exception) {
+            AccountResult.Error("INTERNAL_ERROR", "Sync failed unexpectedly.", false, responseStatus)
         } finally {
             connection?.disconnect()
         }
@@ -228,12 +243,16 @@ class SyncClient(private val baseUrlProvider: () -> String) : CloudSyncApi, Lega
             while (true) {
                 val count = reader.read(buffer, 0, buffer.size)
                 if (count < 0) break
+                if (output.length + count > MAX_RESPONSE_CHARS) {
+                    throw ResponseTooLargeException("Sync response exceeds $MAX_RESPONSE_CHARS characters")
+                }
                 output.append(buffer, 0, count)
-                check(output.length <= MAX_RESPONSE_CHARS) { "Sync response exceeds $MAX_RESPONSE_CHARS characters" }
             }
             output.toString()
         }
     }
+
+    private class ResponseTooLargeException(message: String) : IOException(message)
 
     private fun parseError(body: String, status: Int): AccountResult.Error = runCatching {
         val error = JSONObject(body).optJSONObject("error")

@@ -1,10 +1,12 @@
 package com.aliahad.wovoice.settings
 
-import com.aliahad.wovoice.context.ContextLevel
-import com.aliahad.wovoice.context.ContextPolicy
 import android.content.Context
 import com.aliahad.wovoice.BuildConfig
 import com.aliahad.wovoice.account.AccountSettings
+import com.aliahad.wovoice.context.ContextLevel
+import com.aliahad.wovoice.context.ContextPolicy
+import com.aliahad.wovoice.network.TranscriptionClient
+import java.net.URI
 
 class SettingsStore(context: Context) : AccountSettings {
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
@@ -19,10 +21,12 @@ class SettingsStore(context: Context) : AccountSettings {
 
     var workerUrl: String
         get() = if (BuildConfig.ALLOW_CUSTOM_ENDPOINT) {
-            preferences.getString(KEY_WORKER_URL, BuildConfig.WOVOICE_BASE_URL) ?: BuildConfig.WOVOICE_BASE_URL
+            val stored = preferences.getString(KEY_WORKER_URL, BuildConfig.WOVOICE_BASE_URL)
+            validHttpsUrl(stored) ?: BuildConfig.WOVOICE_BASE_URL
         } else BuildConfig.WOVOICE_BASE_URL
         set(value) {
-            preferences.edit().putString(KEY_WORKER_URL, normalizeUrl(value)).apply()
+            val validated = validHttpsUrl(value) ?: return
+            preferences.edit().putString(KEY_WORKER_URL, validated).apply()
         }
 
     /**
@@ -70,6 +74,26 @@ class SettingsStore(context: Context) : AccountSettings {
         get() = preferences.getBoolean(KEY_WAVEFORM, true)
         set(value) = preferences.edit().putBoolean(KEY_WAVEFORM, value).apply()
 
+    var locale: String
+        get() = TranscriptionClient.sanitizeLocale(preferences.getString(KEY_LOCALE, TranscriptionClient.DEFAULT_LOCALE))
+        set(value) = preferences.edit().putString(KEY_LOCALE, TranscriptionClient.sanitizeLocale(value)).apply()
+
+    var polish: String
+        get() = TranscriptionClient.sanitizePolish(preferences.getString(KEY_POLISH, TranscriptionClient.DEFAULT_POLISH))
+        set(value) = preferences.edit().putString(KEY_POLISH, TranscriptionClient.sanitizePolish(value)).apply()
+
+    var notificationPermissionRequested: Boolean
+        get() = preferences.getBoolean(KEY_NOTIFICATION_PERMISSION_REQUESTED, false)
+        set(value) = preferences.edit().putBoolean(KEY_NOTIFICATION_PERMISSION_REQUESTED, value).apply()
+
+    var syncWarning: String?
+        get() = preferences.getString(KEY_SYNC_WARNING, null)?.takeIf(String::isNotBlank)
+        set(value) {
+            val editor = preferences.edit()
+            if (value.isNullOrBlank()) editor.remove(KEY_SYNC_WARNING) else editor.putString(KEY_SYNC_WARNING, value)
+            editor.apply()
+        }
+
     /** Consent is account-scoped and off for existing installations until enabled. */
     var contextLevel: ContextLevel
         get() = ContextLevel.from(preferences.getString("context_level_${accountId ?: "local"}", "off"))
@@ -83,6 +107,14 @@ class SettingsStore(context: Context) : AccountSettings {
         get() = preferences.getBoolean(KEY_FLOATING_BUBBLE, false)
         set(value) = preferences.edit().putBoolean(KEY_FLOATING_BUBBLE, value).apply()
 
+    var keepAliveEnabled: Boolean
+        get() = preferences.getBoolean(KEY_KEEP_ALIVE, true)
+        set(value) = preferences.edit().putBoolean(KEY_KEEP_ALIVE, value).apply()
+
+    var recentsLockConfirmed: Boolean
+        get() = preferences.getBoolean(KEY_RECENTS_LOCK_CONFIRMED, false)
+        set(value) = preferences.edit().putBoolean(KEY_RECENTS_LOCK_CONFIRMED, value).apply()
+
     var bubblePositionX: Float
         get() = preferences.getFloat(KEY_BUBBLE_X, 0.95f).coerceIn(0f, 1f)
         set(value) = preferences.edit().putFloat(KEY_BUBBLE_X, value.coerceIn(0f, 1f)).apply()
@@ -94,7 +126,7 @@ class SettingsStore(context: Context) : AccountSettings {
     fun observeFloatingBubble(onChanged: () -> Unit): () -> Unit {
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             when (key) {
-                KEY_FLOATING_BUBBLE, KEY_HAPTICS, KEY_ANIMATIONS, KEY_WAVEFORM, KEY_ACCOUNT_ID, null -> onChanged()
+                KEY_FLOATING_BUBBLE, KEY_KEEP_ALIVE, KEY_HAPTICS, KEY_ANIMATIONS, KEY_WAVEFORM, KEY_ACCOUNT_ID, null -> onChanged()
             }
         }
         preferences.registerOnSharedPreferenceChangeListener(listener)
@@ -149,10 +181,38 @@ class SettingsStore(context: Context) : AccountSettings {
         get() = preferences.getLong(KEY_CLOUD_SYNC_CURSOR, 0L)
         set(value) = preferences.edit().putLong(KEY_CLOUD_SYNC_CURSOR, value.coerceAtLeast(0L)).apply()
 
-    // Kept across sign-out: the one-time vault import for that account is done on this phone.
+    // Kept across sign-out per account so switching accounts does not overwrite
+    // another account's completed one-time legacy vault migration.
     override var cloudSyncMigratedAccount: String?
         get() = preferences.getString(KEY_CLOUD_SYNC_MIGRATED_ACCOUNT, null)
-        set(value) = preferences.edit().putString(KEY_CLOUD_SYNC_MIGRATED_ACCOUNT, value).apply()
+            ?: migratedAccounts().firstOrNull()
+        set(value) {
+            val editor = preferences.edit().putString(KEY_CLOUD_SYNC_MIGRATED_ACCOUNT, value)
+            if (!value.isNullOrBlank()) {
+                val updated = migratedAccounts() + value
+                editor.putStringSet(KEY_CLOUD_SYNC_MIGRATED_ACCOUNTS, updated)
+            }
+            editor.apply()
+        }
+
+    override fun isCloudSyncMigrated(accountId: String): Boolean = accountId in migratedAccounts()
+
+    override fun markCloudSyncMigrated(accountId: String) {
+        val updated = migratedAccounts() + accountId
+        preferences.edit()
+            .putString(KEY_CLOUD_SYNC_MIGRATED_ACCOUNT, accountId)
+            .putStringSet(KEY_CLOUD_SYNC_MIGRATED_ACCOUNTS, updated)
+            .apply()
+    }
+
+    private fun migratedAccounts(): Set<String> {
+        val stored = preferences.getStringSet(KEY_CLOUD_SYNC_MIGRATED_ACCOUNTS, null)?.toMutableSet()
+            ?: mutableSetOf()
+        preferences.getString(KEY_CLOUD_SYNC_MIGRATED_ACCOUNT, null)
+            ?.takeIf(String::isNotBlank)
+            ?.let(stored::add)
+        return stored
+    }
 
     override var historySyncEnabled: Boolean
         get() = preferences.getBoolean(KEY_HISTORY_SYNC_ENABLED, true)
@@ -179,7 +239,8 @@ class SettingsStore(context: Context) : AccountSettings {
     override fun isSignedIn(): Boolean = !accountId.isNullOrBlank() && secrets.contains(SecretStore.REFRESH_TOKEN)
 
     override fun clearAccount() {
-        preferences.edit()
+        val currentId = accountId
+        val editor = preferences.edit()
             .remove(KEY_ACCOUNT_ID)
             .remove(KEY_ACCOUNT_EMAIL)
             .remove(KEY_ACCOUNT_ROLE)
@@ -194,7 +255,12 @@ class SettingsStore(context: Context) : AccountSettings {
             .remove(KEY_HISTORY_SYNC_ENABLED)
             .remove(KEY_HISTORY_RETENTION_DAYS)
             .remove(KEY_LAST_SYNC_AT)
-            .apply()
+            .remove(KEY_SYNC_WARNING)
+        if (!currentId.isNullOrBlank()) {
+            editor.remove("context_level_$currentId")
+            editor.remove("context_style_$currentId")
+        }
+        editor.apply()
         secrets.clearAccount()
     }
 
@@ -203,7 +269,16 @@ class SettingsStore(context: Context) : AccountSettings {
         secrets.clearAll()
     }
 
-    private fun normalizeUrl(value: String): String = value.trim().trimEnd('/')
+    private fun validHttpsUrl(value: String?): String? {
+        val normalized = value?.trim()?.trimEnd('/').orEmpty()
+        if (normalized.isEmpty()) return null
+        return runCatching {
+            val uri = URI(normalized)
+            if (uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank()) {
+                normalized
+            } else null
+        }.getOrNull()
+    }
 
     private companion object {
         const val PREFERENCES = "wovoice_settings"
@@ -215,7 +290,13 @@ class SettingsStore(context: Context) : AccountSettings {
         const val KEY_HAPTICS = "haptics_enabled"
         const val KEY_ANIMATIONS = "animations_enabled"
         const val KEY_WAVEFORM = "waveform_enabled"
+        const val KEY_LOCALE = "transcription_locale"
+        const val KEY_POLISH = "transcription_polish"
+        const val KEY_NOTIFICATION_PERMISSION_REQUESTED = "notification_permission_requested"
+        const val KEY_SYNC_WARNING = "sync_warning"
         const val KEY_FLOATING_BUBBLE = "floating_bubble_enabled"
+        const val KEY_KEEP_ALIVE = "bubble_keep_alive_enabled"
+        const val KEY_RECENTS_LOCK_CONFIRMED = "recents_lock_confirmed"
         const val KEY_BUBBLE_X = "bubble_position_x"
         const val KEY_BUBBLE_Y = "bubble_position_y"
         const val KEY_ACCOUNT_ID = "account_id"
@@ -233,6 +314,7 @@ class SettingsStore(context: Context) : AccountSettings {
         const val KEY_SYNC_DEAD_LETTERS = "sync_dead_letters"
         const val KEY_CLOUD_SYNC_CURSOR = "cloud_sync_cursor"
         const val KEY_CLOUD_SYNC_MIGRATED_ACCOUNT = "cloud_sync_migrated_account"
+        const val KEY_CLOUD_SYNC_MIGRATED_ACCOUNTS = "cloud_sync_migrated_accounts"
         const val KEY_HISTORY_SYNC_ENABLED = "history_sync_enabled"
         const val KEY_HISTORY_RETENTION_DAYS = "history_retention_days"
         const val KEY_LAST_SYNC_AT = "last_sync_at"

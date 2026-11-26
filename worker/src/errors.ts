@@ -41,7 +41,12 @@ export class ApiError extends Error {
 }
 
 export function errorResponse(error: ApiError, requestId: string): Response {
-  const headers = new Headers({ "Cache-Control": "no-store" });
+  const headers = new Headers({
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+  });
   if (error.retryAfterSeconds !== undefined) {
     headers.set("Retry-After", error.retryAfterSeconds.toString());
   }

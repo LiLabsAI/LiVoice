@@ -178,7 +178,7 @@ import WoVoiceCore
         do {
             let verification = try await auth.authenticate(base: account.api.baseURL, deletion: true)
             guard owner == expected, account.sessionIdentity == expectedSession else { throw CancellationError() }
-            try await account.call { try await account.api.empty("/v1/me", method: "DELETE", token: $0, body: ["reauthToken": .string(verification.code)]) }
+            try await account.call { try await account.api.empty("/v1/me", method: "DELETE", token: $0, body: ["reauthToken": .string(verification.code), "codeVerifier": .string(verification.verifier)]) }
             guard account.sessionIdentity == expectedSession else { throw CancellationError() }
             try store.removeAll(owner: expected); try account.clear(); profile = nil; lastText = ""; try reload()
         } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin { }
@@ -255,11 +255,10 @@ import WoVoiceCore
     }
     func addTerm(_ input: String) {
         guard let owner else { return }
-        let term = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard (1...80).contains(term.utf16.count) else { message = "Use a word or phrase of up to 80 characters."; return }
+        guard let cleaned = RecordPayload.cleanDictionaryTerm(input) else { message = "Use a single-line word or phrase of 2 to 80 characters."; return }
         do {
-            if dictionary.contains(where: { $0.payload?["normalizedTerm"]?.string == term.lowercased() }) { return }
-            try store.save(owner: owner, record: .init(id: UUID().uuidString, type: .dictionary, payload: RecordPayload.dictionary(term)))
+            if dictionary.contains(where: { $0.payload?["normalizedTerm"]?.string == cleaned.normalized }) { return }
+            try store.save(owner: owner, record: .init(id: UUID().uuidString, type: .dictionary, payload: RecordPayload.dictionary(cleaned.term)))
             try reload(); Task { await sync() }
         } catch { message = error.localizedDescription }
     }
@@ -284,11 +283,10 @@ import WoVoiceCore
     }
     func updateTerm(_ entry: CloudRecord, term: String, confirmed: Bool = true) {
         guard let owner else { return }
-        let value = term.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard (1...80).contains(value.utf16.count) else { message = "Use a word or phrase of up to 80 characters."; return }
-        if dictionary.contains(where: { $0.id != entry.id && $0.payload?["normalizedTerm"]?.string == value.lowercased() }) { message = "That word is already in your vocabulary."; return }
+        guard let cleaned = RecordPayload.cleanDictionaryTerm(term) else { message = "Use a single-line word or phrase of 2 to 80 characters."; return }
+        if dictionary.contains(where: { $0.id != entry.id && $0.payload?["normalizedTerm"]?.string == cleaned.normalized }) { message = "That word is already in your vocabulary."; return }
         do {
-            var updated = entry; updated.payload?["term"] = .string(value); updated.payload?["normalizedTerm"] = .string(value.lowercased())
+            var updated = entry; updated.payload?["term"] = .string(cleaned.term); updated.payload?["normalizedTerm"] = .string(cleaned.normalized)
             if confirmed { updated.payload?["status"] = .string("confirmed") }
             try store.save(owner: owner, record: updated); try reload(); Task { await sync() }
         } catch { message = error.localizedDescription }

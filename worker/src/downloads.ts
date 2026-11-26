@@ -113,11 +113,21 @@ export async function latestDownloads(deps: DownloadDeps, ctx?: ExecutionContext
 async function fromFeed(deps: DownloadDeps): Promise<LatestDownloads> {
   const response = await deps.fetch(`${RELEASES_PAGE}.atom`, {
     headers: { Accept: "application/atom+xml", "User-Agent": "livoice-website" },
+    signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) throw new Error(`GitHub feed answered ${response.status}`);
   const feed = await response.text();
   // The feed lists releases newest first; drafts never appear in it.
-  const tags = [...feed.matchAll(/\/releases\/tag\/([A-Za-z0-9._-]+)"/gu)].map((match) => match[1]);
+  // Extract tags strictly from <entry> <link ... href=".../releases/tag/..." />
+  // metadata, ignoring any links embedded inside <content> release notes HTML.
+  const tags: string[] = [];
+  for (const entryMatch of feed.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/giu)) {
+    const entryWithoutContent = entryMatch[1]!.replace(/<content\b[^>]*>[\s\S]*?<\/content>/giu, "");
+    const linkMatch = entryWithoutContent.match(
+      /<link\b[^>]*\bhref=["'][^"']*\/releases\/tag\/([A-Za-z0-9._-]+)["'][^>]*\/?>/iu,
+    );
+    if (linkMatch?.[1]) tags.push(linkMatch[1]);
+  }
 
   const pick = (platform: DownloadPlatform): DownloadInfo | null => {
     const rule = PLATFORMS[platform];

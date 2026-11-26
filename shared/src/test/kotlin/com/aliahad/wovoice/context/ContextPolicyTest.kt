@@ -17,6 +17,14 @@ class ContextPolicyTest {
         assertEquals("unknown", ContextPolicy.detect("com.instagram.android", level = ContextLevel.APP)!!.purpose)
         assertEquals("post", ContextPolicy.detect("com.instagram.android", "Write a post", level = ContextLevel.APP)!!.purpose)
         assertEquals("comment", ContextPolicy.detect("com.instagram.android", "Add a comment", level = ContextLevel.APP)!!.purpose)
+        assertEquals("chat", ContextPolicy.detect("com.google.android.apps.messaging", level = ContextLevel.APP)!!.purpose)
+        assertEquals("chat", ContextPolicy.detect("com.samsung.android.messaging", level = ContextLevel.APP)!!.purpose)
+        assertEquals("notes", ContextPolicy.detect("md.obsidian", level = ContextLevel.APP)!!.purpose)
+        assertEquals("search", ContextPolicy.detect("com.android.chrome", level = ContextLevel.APP)!!.purpose)
+        assertEquals("chat", ContextPolicy.detect("com.android.chrome", "Reply", level = ContextLevel.APP)!!.purpose)
+        assertEquals("post", ContextPolicy.detect("com.linkedin.android", level = ContextLevel.APP)!!.purpose)
+        assertEquals("chat", ContextPolicy.detect("com.linkedin.android", "Message", level = ContextLevel.APP)!!.purpose)
+        assertEquals("post", ContextPolicy.detect("com.twitter.android", level = ContextLevel.APP)!!.purpose)
     }
     @Test fun `clues require nearby consent and explicit salutation`() {
         assertNull(ContextPolicy.detect("com.whatsapp", level = ContextLevel.OFF, before = "private"))

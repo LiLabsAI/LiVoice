@@ -10,7 +10,7 @@ import { encodeWav } from '../lib/wav'
 const MAX_DURATION_MS = 60_000
 // Mirrors the main-process visibility windows minus a beat for the exit anim.
 const SUCCESS_EXIT_AT_MS = 1900
-const ERROR_EXIT_AT_MS = 3300
+const ERROR_EXIT_AT_MS = 3500
 const CANCELLED_EXIT_AT_MS = 1300
 const BAR_COUNT = 18
 
@@ -38,6 +38,11 @@ let chunks: Float32Array[] = []
 let detector: SpeechSignalDetector | null = null
 let audioContext: AudioContext | null = null
 let mediaStream: MediaStream | null = null
+// Strong module-level references prevent Chromium GC from collecting live audio
+// graph nodes mid-recording and silently halting onaudioprocess callbacks.
+let audioSource: MediaStreamAudioSourceNode | null = null
+let audioProcessor: ScriptProcessorNode | null = null
+let audioMute: GainNode | null = null
 let autoStop: ReturnType<typeof setTimeout> | null = null
 const stateTimers: ReturnType<typeof setTimeout>[] = []
 const phaseTimers: ReturnType<typeof setTimeout>[] = []
@@ -52,6 +57,13 @@ function running(): boolean {
 function setState(state: UiState): void {
   uiState = state
   document.body.dataset.state = state
+  if (state === 'error') {
+    cancel.title = 'Dismiss'
+    cancel.setAttribute('aria-label', 'Dismiss')
+  } else {
+    cancel.title = 'Cancel dictation'
+    cancel.setAttribute('aria-label', 'Cancel dictation')
+  }
 }
 
 function clearTimers(list: ReturnType<typeof setTimeout>[]): void {
@@ -60,6 +72,7 @@ function clearTimers(list: ReturnType<typeof setTimeout>[]): void {
 }
 
 function schedule(fn: () => void, ms: number): void {
+  clearTimers(stateTimers)
   const t = setTimeout(fn, ms)
   stateTimers.push(t)
 }
@@ -70,6 +83,13 @@ function setLine(text: string): void {
 
 function setSub(text: string): void {
   subLine.textContent = text
+}
+
+function setRecordingHint(actionText: string): void {
+  subLine.textContent = `${actionText} · `
+  const esc = document.createElement('kbd')
+  esc.textContent = 'esc'
+  subLine.append(esc, ' cancels')
 }
 
 function startTick(): void {
@@ -92,41 +112,53 @@ function enterRecording(releaseHint: string): void {
   pill.classList.add('show')
   pill.dataset.tone = ''
   setLine('Listening…')
-  // The hint used to say "⌥" whatever trigger key was chosen.
-  subLine.textContent = `${releaseHint} to transcribe · `
-  const esc = document.createElement('kbd')
-  esc.textContent = 'esc'
-  subLine.append(esc, ' cancels')
+  setRecordingHint(`${releaseHint} to transcribe`)
   timerEl.textContent = '0:00'
   startTick()
   for (const bar of bars) bar.style.height = '5px'
 }
 
-async function begin(id: number): Promise<void> {
+async function openMicStream(micDeviceId: string): Promise<MediaStream> {
+  const baseAudio: MediaTrackConstraints = {
+    channelCount: 1,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true
+  }
+  if (micDeviceId) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: { ...baseAudio, deviceId: { exact: micDeviceId } }
+      })
+    } catch (error) {
+      // Selected mic disconnected or unavailable — fall back to the default input.
+      const name = error instanceof Error ? error.name : ''
+      if (name === 'NotAllowedError' || name === 'SecurityError') throw error
+    }
+  }
+  return navigator.mediaDevices.getUserMedia({ audio: baseAudio })
+}
+
+async function begin(id: number, micDeviceId: string): Promise<void> {
   if (running()) return
   // Claim the session synchronously: a release that lands while the mic is
   // still starting must not leave a ghost recording running after finish().
   runningFlag.value = true
   try {
-    const opened = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      }
-    })
-    if (id !== sessionId || !running()) { opened.getTracks().forEach((track) => track.stop()); return }
+    const opened = await openMicStream(micDeviceId)
+    if (id !== sessionId || !running()) {
+      opened.getTracks().forEach((track) => track.stop())
+      return
+    }
     mediaStream = opened
   } catch {
     if (id !== sessionId || !running()) return
-    window.api.overlay.fail('Microphone access was denied. Enable it and try again.', id)
     runningFlag.value = false
-    fail('Microphone access was denied. Enable it and try again.')
+    // Notify main once — main drives the single error state transition & sound.
+    window.api.overlay.fail('Microphone access was denied. Enable it and try again.', id)
     return
   }
   if (!running() || id !== sessionId) {
-    // Cancelled while getUserMedia was pending — release the device we opened.
     teardownAudio()
     return
   }
@@ -142,10 +174,11 @@ async function begin(id: number): Promise<void> {
     else void openedContext.close()
     return
   }
+
   detector = new SpeechSignalDetector(audioContext.sampleRate)
-  const source = audioContext.createMediaStreamSource(mediaStream)
-  const processor = audioContext.createScriptProcessor(4096, 1, 1)
-  processor.onaudioprocess = (event) => {
+  audioSource = audioContext.createMediaStreamSource(mediaStream)
+  audioProcessor = audioContext.createScriptProcessor(4096, 1, 1)
+  audioProcessor.onaudioprocess = (event) => {
     if (!running()) return
     const input = event.inputBuffer.getChannelData(0)
     const copy = new Float32Array(input)
@@ -153,16 +186,14 @@ async function begin(id: number): Promise<void> {
     const rms = detector!.observe(copy)
     animateBars(rms)
   }
-  source.connect(processor)
+  audioSource.connect(audioProcessor)
   // ScriptProcessorNode only pumps while connected to the destination; a
   // zero-gain node keeps it running without monitoring the mic out loud.
-  const mute = audioContext.createGain()
-  mute.gain.value = 0
-  processor.connect(mute)
-  mute.connect(audioContext.destination)
+  audioMute = audioContext.createGain()
+  audioMute.gain.value = 0
+  audioProcessor.connect(audioMute)
+  audioMute.connect(audioContext.destination)
 
-  // Ask main to end the session: finishing here alone left main in its
-  // "recording" state, so it discarded the WAV and the dictation was lost.
   autoStop = setTimeout(() => {
     autoStop = null
     window.api.overlay.autoStop(id)
@@ -203,11 +234,12 @@ function setSuccess(text: string, polished: boolean): void {
   clearTimers(phaseTimers)
   stopTick()
   setState('success')
+  pill.classList.remove('closing')
+  pill.classList.add('show')
   pill.dataset.tone = 'success'
   setLine(text)
   setSub(polished ? 'Inserted at your cursor · ' : 'Inserted at your cursor')
   if (polished) {
-    // setSub writes textContent, so the chip markup used to show as literal tags.
     const chip = document.createElement('span')
     chip.className = 'chip'
     chip.textContent = '✨ polished'
@@ -216,28 +248,38 @@ function setSuccess(text: string, polished: boolean): void {
   schedule(() => pill.classList.add('closing'), SUCCESS_EXIT_AT_MS)
 }
 
-function fail(message: string): void {
+function fail(message: string, copied = false): void {
   clearTimers(phaseTimers)
   stopTick()
   setState('error')
+  pill.classList.remove('closing')
+  pill.classList.add('show')
   pill.dataset.tone = 'error'
   setLine(message)
-  setSub('Nothing was inserted')
+  setSub(copied ? 'Saved to History and copied to clipboard' : 'Nothing was inserted')
   schedule(() => pill.classList.add('closing'), ERROR_EXIT_AT_MS)
 }
 
 function setCancelled(): void {
-  // The cancelled state can arrive from main (Esc) while the mic is live:
-  // release the device, the pending auto-stop, and any buffered audio now,
-  // or a stale auto-stop would transcribe and paste the cancelled audio.
   discardCapture()
   clearTimers(phaseTimers)
   setState('cancelled')
+  pill.classList.remove('closing')
+  pill.classList.add('show')
   pill.dataset.tone = ''
   setLine('Dictation cancelled')
   setSub('')
   settleBars()
   schedule(() => pill.classList.add('closing'), CANCELLED_EXIT_AT_MS)
+}
+
+function setSilentCancelled(): void {
+  discardCapture()
+  clearTimers(phaseTimers)
+  clearTimers(stateTimers)
+  setState('idle')
+  pill.classList.remove('show', 'closing')
+  pill.dataset.tone = ''
 }
 
 /** Releases every capture resource; safe to call from any state. */
@@ -254,12 +296,12 @@ function discardCapture(): void {
 }
 
 function finish(): void {
+  if (!running()) return
   if (autoStop !== null) {
     clearTimeout(autoStop)
     autoStop = null
   }
   stopTick()
-  enterProcessing()
   const captured = chunks
   chunks = []
   const detection = detector?.result() ?? { containsSpeech: false, durationMs: 0 }
@@ -271,15 +313,15 @@ function finish(): void {
   teardownAudio()
   runningFlag.value = false
 
+  // Reject silence BEFORE switching visuals to "Uploading audio…".
   if (!detection.containsSpeech) {
     console.log('overlay page: speech gate rejected —', JSON.stringify(detection))
     window.api.overlay.fail('No clear speech detected — try speaking a little longer', sessionId)
     return
   }
 
-  // The cap timer starts after the microphone opens and audio arrives in
-  // 4096-sample blocks, so a capped recording can run a little past 60 s —
-  // beyond the Worker's 60.1 s limit. Trim to exactly the cap.
+  enterProcessing()
+
   const maxSamples = Math.floor((sampleRate * MAX_DURATION_MS) / 1000)
   const total = Math.min(
     maxSamples,
@@ -303,12 +345,45 @@ function finish(): void {
   })
 }
 
-function cancelCapture(): void {
-  discardCapture()
-  window.api.overlay.cancelled(sessionId)
+function handleCloseButton(): void {
+  if (uiState === 'recording' || uiState === 'processing') {
+    discardCapture()
+    window.api.overlay.cancelled(sessionId)
+    return
+  }
+  clearTimers(phaseTimers)
+  clearTimers(stateTimers)
+  setState('idle')
+  pill.classList.remove('show', 'closing')
+  window.api.overlay.dismiss()
 }
 
 function teardownAudio(): void {
+  if (audioProcessor !== null) {
+    audioProcessor.onaudioprocess = null
+    try {
+      audioProcessor.disconnect()
+    } catch {
+      // already disconnected
+    }
+    audioProcessor = null
+  }
+  if (audioSource !== null) {
+    try {
+      audioSource.disconnect()
+    } catch {
+      // already disconnected
+    }
+    audioSource = null
+  }
+  if (audioMute !== null) {
+    try {
+      audioMute.disconnect()
+    } catch {
+      // already disconnected
+    }
+    audioMute = null
+  }
   mediaStream?.getTracks().forEach((track) => track.stop())
   mediaStream = null
   void audioContext?.close()
@@ -316,20 +391,28 @@ function teardownAudio(): void {
   settleBars()
 }
 
-window.api.overlay.onBegin((releaseHint, id) => {
+window.api.overlay.onBegin((releaseHint, id, micDeviceId) => {
   discardCapture()
   sessionId = id
   transcriptionLabel = 'Transcribing…'
   clearTimers(stateTimers)
+  clearTimers(phaseTimers)
   pill.classList.remove('closing')
   enterRecording(releaseHint)
-  void begin(id)
+  void begin(id, micDeviceId)
 })
 window.api.overlay.onEnd(() => finish())
+window.api.overlay.onLatch((hint) => {
+  if (uiState === 'recording') {
+    setRecordingHint(`${hint} to finish`)
+  }
+})
 window.api.overlay.onState((state) => {
   if (state.state === 'transcribing') {
-    // Main picked the capture up; keep the processing visuals going.
-    transcriptionLabel = state.contextLabel && state.contextLabel !== 'Context off' ? `Transcribing · ${state.contextLabel}` : 'Transcribing…'
+    transcriptionLabel =
+      state.contextLabel && state.contextLabel !== 'Context off'
+        ? `Transcribing · ${state.contextLabel}`
+        : 'Transcribing…'
     if (uiState === 'processing') setLine(transcriptionLabel)
     return
   }
@@ -338,11 +421,15 @@ window.api.overlay.onState((state) => {
     return
   }
   if (state.state === 'error') {
-    fail(state.message)
+    fail(state.message, state.copied === true)
     return
   }
   if (state.state === 'cancelled') {
     setCancelled()
+    return
+  }
+  if (state.state === 'silent-cancel') {
+    setSilentCancelled()
   }
 })
-cancel.addEventListener('click', cancelCapture)
+cancel.addEventListener('click', handleCloseButton)

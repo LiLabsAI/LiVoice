@@ -26,7 +26,10 @@ describe('vault crypto (byte-exact with Kotlin)', () => {
     const out = Buffer.from(
       hkdfSync('sha256', SECRET, Buffer.from('WoVoice recovery v1'), Buffer.from('acct-123'), 32)
     )
-    assert.equal(out.toString('hex'), '47051702b02052ffc5f60a0bbc8fbe43e5cca05a18e0d87a96600d52d25dce82')
+    assert.equal(
+      out.toString('hex'),
+      '47051702b02052ffc5f60a0bbc8fbe43e5cca05a18e0d87a96600d52d25dce82'
+    )
   })
 
   test('recovery key encoding matches the Kotlin implementation', () => {
@@ -69,10 +72,7 @@ describe('vault crypto (byte-exact with Kotlin)', () => {
     const vaultKey = newSecret()
     const plaintext = Buffer.from('{"text":"Hello WoVoice"}')
     const sealed = encryptRecord(vaultKey, plaintext, 'acct-1', 'history', 'rec-9', 1, 1)
-    assert.deepEqual(
-      decryptRecord(vaultKey, sealed, 'acct-1', 'history', 'rec-9', 1, 1),
-      plaintext
-    )
+    assert.deepEqual(decryptRecord(vaultKey, sealed, 'acct-1', 'history', 'rec-9', 1, 1), plaintext)
     // Any metadata change must break decryption (no record shuffling across ids).
     assert.equal(decryptRecord(vaultKey, sealed, 'acct-2', 'history', 'rec-9', 1, 1), null)
     assert.equal(decryptRecord(vaultKey, sealed, 'acct-1', 'dictionary', 'rec-9', 1, 1), null)

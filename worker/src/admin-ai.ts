@@ -42,10 +42,15 @@ export async function handleAdminAiRoute(request: Request, env: AppEnv, requestI
     const config = parseConfiguration(body.config);
     const text = boundedText(body.text, "Sample transcript", 1, 4_000);
     const glossary = body.glossary;
-    if (!Array.isArray(glossary) || glossary.length > 30 || !glossary.every((value) => typeof value === "string" && value.trim().length > 0 && value.length <= 80)
+    if (!Array.isArray(glossary) || glossary.length > 100 || !glossary.every((value) => typeof value === "string" && value.trim().length > 0 && value.trim().length <= 80)
+      || glossary.map((value) => value.trim()).join("\n").length > 4_000
       || typeof body.sentenceStart !== "boolean" || typeof body.commands !== "boolean") throw new ApiError(400, "INVALID_REQUEST", false, "The sample context is invalid.");
-    let options: TranscriptionOptions = { locale: "en-IN", polish: "light", sentenceStart: body.sentenceStart, commands: body.commands ? ["new_line", "new_paragraph"] : [], glossary };
-    try { options.context = parseContext(body.context); options = preparePolishContext(config, text, options); }
+    const cleanedGlossary = glossary.map((value) => value.trim());
+    let parsedContext: TranscriptionOptions["context"];
+    try { parsedContext = parseContext(body.context); }
+    catch { throw new ApiError(400, "INVALID_REQUEST", false, "The automatic context is invalid or exceeds its privacy budget."); }
+    let options: TranscriptionOptions = { locale: "en-IN", polish: "light", sentenceStart: body.sentenceStart, commands: body.commands ? ["new_line", "new_paragraph"] : [], glossary: cleanedGlossary, ...(parsedContext ? { context: parsedContext } : {}) };
+    try { options = preparePolishContext(config, text, options); }
     catch { throw new ApiError(400, "INVALID_REQUEST", false, "The combined prompt and sample exceed the cleanup input budget. Shorten the prompt or sample."); }
     const messages = polishMessages(config, text, options);
     if (!config.cleanup.enabled || contextSkipsCleanup(options.context)) return noStoreJson({ requestId, text, candidate: null, accepted: false, status: contextSkipsCleanup(options.context) ? "literal_passthrough" : "cleanup_disabled", messages, contextDecision: options.context ? { purpose: options.context.purpose, audience: options.context.audience, source: options.context.source, style: options.context.style, level: options.context.level, nearbyTextUsed: false } : null, latencyMs: 0, usage: null });

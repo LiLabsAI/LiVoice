@@ -40,12 +40,21 @@ object ContextPolicy {
             else -> "unknown"
         }
         if (purpose == "unknown") {
-            purpose = when (app) {
-                "com.google.android.gm", "com.microsoft.office.outlook", "com.microsoft.outlook", "com.apple.mail", "org.mozilla.thunderbird" -> "email"
-                "com.whatsapp", "net.whatsapp.whatsapp", "com.whatsapp.w4b", "com.facebook.orca", "com.tencent.mm", "com.tencent.xinwechat", "com.apple.ichat", "org.telegram.messenger", "ru.keepcoder.telegram", "ph.telegra.telegraph", "org.thoughtcrime.securesms", "org.whispersystems.signal-desktop", "com.discord" -> "chat"
-                "com.slack", "com.tinyspeck.slackmacgap", "com.microsoft.teams", "com.microsoft.teams2" -> "work_chat"
-                "com.apple.notes", "com.miui.notes", "com.google.android.keep", "com.microsoft.office.onenote", "notion.id" -> "notes"
-                "com.apple.terminal", "com.googlecode.iterm2", "com.microsoft.vscode", "com.sublimetext.4" -> "code"
+            val chatHint = Regex("\\b(message|chat|reply)\\b").containsMatchIn(label)
+            purpose = when {
+                app in setOf("com.google.android.gm", "com.microsoft.office.outlook", "com.microsoft.outlook", "com.apple.mail", "org.mozilla.thunderbird") -> "email"
+                app in setOf(
+                    "com.whatsapp", "net.whatsapp.whatsapp", "com.whatsapp.w4b", "com.facebook.orca",
+                    "com.tencent.mm", "com.tencent.xinwechat", "com.apple.ichat", "org.telegram.messenger",
+                    "ru.keepcoder.telegram", "ph.telegra.telegraph", "org.thoughtcrime.securesms",
+                    "org.whispersystems.signal-desktop", "com.discord",
+                    "com.google.android.apps.messaging", "com.samsung.android.messaging",
+                ) -> "chat"
+                app in setOf("com.slack", "com.tinyspeck.slackmacgap", "com.microsoft.teams", "com.microsoft.teams2") -> "work_chat"
+                app in setOf("com.apple.notes", "com.miui.notes", "com.google.android.keep", "com.microsoft.office.onenote", "notion.id", "md.obsidian") -> "notes"
+                app in setOf("com.apple.terminal", "com.googlecode.iterm2", "com.microsoft.vscode", "com.sublimetext.4") -> "code"
+                app in setOf("com.linkedin.android", "com.twitter.android") && !chatHint -> "post"
+                app == "com.android.chrome" && !chatHint -> "search"
                 else -> "unknown"
             }
             source = if (purpose == "unknown") "unknown" else "app"

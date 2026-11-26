@@ -93,7 +93,8 @@ export function decodeRecoveryKey(value: string): Buffer | null {
     const expected = base32Encode(createHash('sha256').update(secret).digest()).slice(0, 6)
     const actual = Buffer.from(encoded.slice(-6))
     const expectedBuffer = Buffer.from(expected)
-    if (actual.length !== expectedBuffer.length || !timingSafeEqual(actual, expectedBuffer)) return null
+    if (actual.length !== expectedBuffer.length || !timingSafeEqual(actual, expectedBuffer))
+      return null
     return secret
   } catch {
     return null
@@ -173,7 +174,11 @@ export function encryptRecord(
   keyVersion: number,
   schemaVersion: number
 ): EncryptedRecord {
-  return encrypt(vaultKey, plaintext, metadata(accountId, type, recordId, keyVersion, schemaVersion))
+  return encrypt(
+    vaultKey,
+    plaintext,
+    metadata(accountId, type, recordId, keyVersion, schemaVersion)
+  )
 }
 
 export function decryptRecord(

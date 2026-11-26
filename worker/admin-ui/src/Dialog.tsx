@@ -1,6 +1,16 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
-export function Dialog({ title, children, onClose }: { title: string; children: ReactNode; onClose(): void }) {
+export function Dialog({
+  title,
+  eyebrow = "AI CONFIGURATION",
+  children,
+  onClose,
+}: {
+  title: string;
+  eyebrow?: string;
+  children: ReactNode;
+  onClose(): void;
+}) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     const previous = document.activeElement;
@@ -17,7 +27,7 @@ export function Dialog({ title, children, onClose }: { title: string; children: 
       if (event.shiftKey && (document.activeElement === first || document.activeElement === event.currentTarget)) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     }}>
-      <div className="modal-head"><div><p className="eyebrow">AI CONFIGURATION</p><h2>{title}</h2></div><button className="icon-button" type="button" aria-label="Close dialog" onClick={onClose}>×</button></div>
+      <div className="modal-head"><div><p className="eyebrow">{eyebrow}</p><h2>{title}</h2></div><button className="icon-button" type="button" aria-label="Close dialog" onClick={onClose}>×</button></div>
       {children}
     </section>
   </div>;

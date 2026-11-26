@@ -227,3 +227,40 @@ import Testing
     #expect(pending.contains { $0.record.id == "local-word" && $0.record.deleted })
     #expect(pending.contains { $0.record.id == "remote-word" && $0.record.version == 2 && !$0.record.deleted })
 }
+@Test func boundGlossaryEnforcesCountAndFourThousandCharBudget() {
+    let longTerms = (0..<80).map { String(format: "Term%02d ", $0) + String(repeating: "a", count: 70) }
+    let bounded = APIClient.boundGlossary(longTerms)
+    #expect(bounded.count < 80)
+    #expect(bounded.joined(separator: "\n").utf16.count <= 4_000)
+    let exact = [String(repeating: "x", count: 80), String(repeating: "y", count: 80)]
+    #expect(APIClient.boundGlossary(exact, maxItems: 100, maxChars: 161).count == 2)
+    #expect(APIClient.boundGlossary(exact, maxItems: 100, maxChars: 160).count == 1)
+}
+@Test func dictionaryNormalizationMatchesCrossPlatformRules() {
+    #expect(RecordPayload.cleanDictionaryTerm("a") == nil)
+    #expect(RecordPayload.cleanDictionaryTerm("line1\nline2") == nil)
+    let cleaned = RecordPayload.cleanDictionaryTerm("  Professor   Ｒａｈｍａｎ  ")
+    #expect(cleaned?.term == "Professor Ｒａｈｍａｎ")
+    #expect(cleaned?.normalized == "professor rahman")
+}
+@Test @MainActor func historyOffDropsTombstonesAndSuggestedTermsStayLocal() throws {
+    let store = try RecordStore(url: URL(fileURLWithPath: ":memory:"))
+    try store.save(owner: "alice", record: .init(id: "s1", type: .dictionary, payload: RecordPayload.dictionary("Koramangala", status: "suggested", source: "learned")))
+    try store.save(owner: "alice", record: .init(id: "c1", type: .dictionary, payload: RecordPayload.dictionary("Bengaluru", status: "confirmed", source: "manual")))
+    let pending = try store.pending(owner: "alice", historyEnabled: true)
+    #expect(pending.map(\.record.id) == ["c1"])
+
+    try store.save(owner: "alice", record: .init(id: "h-live", type: .history, version: 3, payload: ["text": .string("Keep"), "createdAtMs": .number(100)]), dirty: false)
+    try store.save(owner: "alice", record: .init(id: "h-del", type: .history, version: 3, deleted: true, payload: nil), dirty: false)
+    try store.applySettings(owner: "alice", settings: CloudSettings(historySyncEnabled: false))
+    #expect(try store.record(owner: "alice", type: .history, id: "h-del") == nil)
+    let live = try #require(try store.record(owner: "alice", type: .history, id: "h-live"))
+    #expect(live.version == 0 && !live.deleted)
+
+    // Dirty local edit survives a remote tombstone merge.
+    let edited = CloudRecord(id: "d-edit", type: .dictionary, version: 2, payload: RecordPayload.dictionary("Edited"))
+    try store.save(owner: "alice", record: edited, dirty: true)
+    try store.merge(owner: "alice", remote: .init(id: "d-edit", type: .dictionary, version: 4, deleted: true, payload: nil))
+    let kept = try #require(try store.record(owner: "alice", type: .dictionary, id: "d-edit"))
+    #expect(!kept.deleted && kept.version == 4)
+}

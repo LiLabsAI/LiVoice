@@ -103,7 +103,14 @@ export async function completeQuota(
   ]);
 }
 
-export async function releaseQuota(env: AppEnv, reservation: QuotaReservation): Promise<void> {
+export async function releaseQuota(
+  env: AppEnv,
+  reservation: QuotaReservation,
+  incurredGlobalNeurons = 0,
+): Promise<void> {
+  const usedGlobalNeurons = Number.isFinite(incurredGlobalNeurons)
+    ? Math.max(0, Math.min(incurredGlobalNeurons, reservation.reservedNeurons))
+    : 0;
   await env.DB.batch([
     env.DB.prepare(
       `UPDATE daily_usage SET
@@ -114,10 +121,12 @@ export async function releaseQuota(env: AppEnv, reservation: QuotaReservation): 
          AND EXISTS (SELECT 1 FROM quota_reservations WHERE id = ? AND status = 'reserved')`,
     ).bind(reservation.audioSeconds, reservation.reservedNeurons, reservation.id, reservation.dateKey, reservation.id),
     env.DB.prepare(
-      `UPDATE global_daily_usage SET reserved_neurons = MAX(0, reserved_neurons - ?)
+      `UPDATE global_daily_usage SET
+         reserved_neurons = MAX(0, reserved_neurons - ?),
+         used_neurons = used_neurons + ?
        WHERE date_key = ?
          AND EXISTS (SELECT 1 FROM quota_reservations WHERE id = ? AND status = 'reserved')`,
-    ).bind(reservation.reservedNeurons, reservation.dateKey, reservation.id),
+    ).bind(reservation.reservedNeurons, usedGlobalNeurons, reservation.dateKey, reservation.id),
     env.DB.prepare("UPDATE quota_reservations SET status = 'released' WHERE id = ? AND status = 'reserved'")
       .bind(reservation.id),
   ]);

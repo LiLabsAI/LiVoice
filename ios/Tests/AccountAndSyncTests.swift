@@ -676,6 +676,7 @@ private final class FixtureAuthentication: AccountAuthenticating {
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer rotated")
         let body = try JSONDecoder().decode(Payload.self, from: #require(request.httpBody))
         #expect(body["reauthToken"]?.string == "fresh-verification-code-for-tests")
+        #expect((body["codeVerifier"]?.string?.isEmpty ?? true) == false)
         #expect(model.owner == nil && persistence.value == nil && !model.busy && !model.microphoneActive)
         for type in RecordType.allCases { #expect(try model.store.records(owner: "alice", type: type).isEmpty) }
         #expect(try model.store.records(owner: "bob", type: .dictionary).count == 1)

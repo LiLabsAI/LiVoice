@@ -4,6 +4,8 @@ import { preparePolishContext, cleanupPricing, type CleanupModel } from "./ai-co
 import { readActiveAiConfiguration } from "./ai-config-store";
 import { handleAdminRoute, productionAdminServices } from "./admin";
 import { authenticateAccess, handleAccountRoute, handleAuthRoute, productionAuthServices } from "./auth";
+import { API_SECURITY_HEADERS, noStoreJson } from "./http";
+import { GLOBAL_DAILY_NEURON_LIMIT } from "./limits";
 import {
   NOVA_NEURONS_PER_MINUTE,
   NOVA_USD_PER_MINUTE,
@@ -17,7 +19,7 @@ import { parseOptions } from "./options";
 import { completeQuota, releaseQuota, reserveQuota, type QuotaReservation } from "./quota";
 import { handleRecordsRoute } from "./records";
 import { handleSyncRoute } from "./sync";
-import { recordActivity, recheckActiveAccount, requireActiveAccount } from "./moderation";
+import { recordActivity, recheckActiveAccount, requireActiveAccount, safeFailure } from "./moderation";
 import type { AdminServices, AppEnv, AuthServices, Principal, Services } from "./types";
 import { chooseSafePolish } from "./validation";
 import { readBodyLimited, validateWav } from "./wav";
@@ -40,11 +42,10 @@ export function createHandler(
     const downloadResponse = await handleDownloadRoute(request, ctx, downloadDeps);
     if (downloadResponse) return downloadResponse;
     if (request.method === "GET" && url.pathname === "/.well-known/assetlinks.json") {
-      return Response.json(androidAssetLinks(env), {
+      return noStoreJson(androidAssetLinks(env), {
         headers: {
           // Signing identities may change during an app-key migration. Always
           // let Android retrieve the current association instead of an edge-stale copy.
-          "cache-control": "no-store",
           "content-type": "application/json; charset=utf-8",
         },
       });
@@ -59,17 +60,13 @@ export function createHandler(
     ) {
       const asset = await env.ASSETS.fetch(request);
       const headers = new Headers(asset.headers);
-      headers.set("cache-control", "no-store");
+      for (const [name, value] of Object.entries(API_SECURITY_HEADERS)) {
+        headers.set(name, value);
+      }
       return new Response(asset.body, { status: asset.status, headers });
     }
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/v1/status")) {
-      return Response.json({
-        name: "LiVoice API",
-        status: "online",
-        apiVersion: "v1",
-        documentation: "https://github.com/LiLabsAI/LiVoice",
-        authentication: "Passwordless LiVoice account required for protected endpoints",
-      });
+      return serviceStatus(env);
     }
 
     const requestId = crypto.randomUUID();
@@ -84,6 +81,9 @@ export function createHandler(
     let principal: Principal | null = null;
     let reservation: QuotaReservation | null = null;
     let quotaCompleted = false;
+    let asrCompleted = false;
+    let incurredGlobalNeurons = 0;
+    let incurredCostUsd = 0;
     let audioSeconds = 0;
     let estimatedCostUsd = 0;
     let outcomeCode: string | null = null;
@@ -127,7 +127,7 @@ export function createHandler(
           throw new ApiError(429, "RATE_LIMITED", true, "Too many requests. Please wait a moment.", 60);
         }
         status = 200;
-        return Response.json({ requestId, ok: true }, { status });
+        return noStoreJson({ requestId, ok: true }, { status });
       }
       if (request.method !== "POST" || url.pathname !== "/v1/transcriptions") {
         throw new ApiError(404, "NOT_FOUND", false, "This endpoint does not exist.");
@@ -152,7 +152,12 @@ export function createHandler(
         headers: { "content-type": contentType },
         body,
       });
-      const form = await parsedRequest.formData();
+      let form: FormData;
+      try {
+        form = await parsedRequest.formData();
+      } catch {
+        throw new ApiError(400, "INVALID_REQUEST", false, "The multipart recording payload is malformed.");
+      }
       const file = form.get("audio");
       if (!(file instanceof File)) {
         throw new ApiError(400, "INVALID_REQUEST", false, "The audio recording is missing.");
@@ -163,26 +168,51 @@ export function createHandler(
       audioBytes = audio.byteLength;
       const wav = validateWav(audio);
       audioSeconds = wav.durationSeconds;
-      reservation = await reserveQuota(env, principal.userId, requestId, wav.durationSeconds, contextSkipsCleanup(options.context) ? { ...config, cleanup: { ...config.cleanup, enabled: false } } : config);
+      const shouldCleanup = config.cleanup.enabled && options.polish !== "off" && !contextSkipsCleanup(options.context);
+      reservation = await reserveQuota(
+        env,
+        principal.userId,
+        requestId,
+        wav.durationSeconds,
+        shouldCleanup ? config : { ...config, cleanup: { ...config.cleanup, enabled: false } },
+      );
 
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort("inference timeout"), config.service.timeoutMs);
       try {
         const asrStartedAt = performance.now();
-        const result = await services.transcribe(env, audio, options, controller.signal, config);
+        let result;
+        try {
+          result = await services.transcribe(env, audio, options, controller.signal, config);
+        } catch (error) {
+          console.error(JSON.stringify({
+            event: "asr_upstream_failed",
+            requestId,
+            model: selectedModel,
+            aborted: controller.signal.aborted,
+            reason: safeFailure(error),
+          }));
+          throw error;
+        }
         asrMs = Math.round(performance.now() - asrStartedAt);
         selectedModel = result.model;
+        asrCompleted = true;
+        const asrOnlyUsage = buildUsage(selectedModel, wav.durationSeconds, { input: 0, output: 0 }, config.cleanup.model)!;
+        incurredGlobalNeurons = asrOnlyUsage.asrNeurons;
+        incurredCostUsd = asrOnlyUsage.estimatedCostUsd;
 
         let finalText = result.text.trim();
         let polished = false;
         let nearbyTextUsed = false;
         let polishTokens: { input: number; output: number } | null = { input: 0, output: 0 };
         const polishStartedAt = performance.now();
-        if (config.cleanup.enabled && !contextSkipsCleanup(options.context)) try {
+        if (shouldCleanup) try {
           const prepared = preparePolishContext(config, finalText, options);
           options.context = prepared.context;
           nearbyTextUsed = !!(options.context?.before || options.context?.after);
           polishTokens = null; // An attempted call without token usage must retain a conservative charge.
+          incurredGlobalNeurons = reservation.reservedNeurons;
+          incurredCostUsd = estimateConservativeCostUsd(selectedModel, wav.durationSeconds, config.cleanup.model, reservation.reservedNeurons);
           const candidate = await services.polish(env, finalText, options, controller.signal, config);
           if (candidate.inputTokens !== null && candidate.outputTokens !== null) {
             polishTokens = { input: candidate.inputTokens, output: candidate.outputTokens };
@@ -193,22 +223,33 @@ export function createHandler(
             finalText = safe;
           }
         } catch (error) {
+          console.error(JSON.stringify({
+            event: "polish_upstream_failed",
+            requestId,
+            model: config.cleanup.model,
+            aborted: controller.signal.aborted,
+            reason: safeFailure(error),
+          }));
           if (controller.signal.aborted) throw error;
           // A cleanup failure is intentionally non-fatal; the ASR text is safer.
         }
         polishMs = Math.round(performance.now() - polishStartedAt);
         const usage = buildUsage(selectedModel, wav.durationSeconds, polishTokens, config.cleanup.model);
-        totalNeurons = usage?.totalNeurons ?? null;
-        estimatedCostUsd = usage?.estimatedCostUsd ?? 0;
+        const billedNeurons = usage?.totalNeurons ?? reservation.reservedNeurons;
+        totalNeurons = billedNeurons;
+        estimatedCostUsd = usage?.estimatedCostUsd
+          ?? estimateConservativeCostUsd(selectedModel, wav.durationSeconds, config.cleanup.model, billedNeurons);
+        incurredGlobalNeurons = billedNeurons;
+        incurredCostUsd = estimatedCostUsd;
         if (principal) {
           principal = await recheckActiveAccount(env, principal);
         }
         if (reservation) {
-          await completeQuota(env, reservation, totalNeurons ?? reservation.reservedNeurons);
+          await completeQuota(env, reservation, billedNeurons);
           quotaCompleted = true;
         }
         status = 200;
-        return Response.json(
+        return noStoreJson(
           {
             requestId,
             text: finalText,
@@ -245,8 +286,13 @@ export function createHandler(
       return errorResponse(safeError, requestId);
     } finally {
       if (reservation && !quotaCompleted) {
+        const settleGlobal = asrCompleted ? incurredGlobalNeurons : 0;
+        if (asrCompleted && totalNeurons === null) {
+          totalNeurons = settleGlobal;
+          estimatedCostUsd = incurredCostUsd;
+        }
         try {
-          await releaseQuota(env, reservation);
+          await releaseQuota(env, reservation, settleGlobal);
         } catch {
           // The scheduled cleanup releases any reservation left by an interrupted request.
         }
@@ -293,19 +339,104 @@ export function createHandler(
   };
 }
 
+async function serviceStatus(env: AppEnv): Promise<Response> {
+  const checkedAt = Date.now();
+  const dateKey = new Date(checkedAt).toISOString().slice(0, 10);
+  let database: "operational" | "degraded" = "operational";
+  let transcription: "operational" | "maintenance" | "degraded" = "operational";
+  let quota: "operational" | "exhausted" | "degraded" = "operational";
+  let maintenanceMessage: string | undefined;
+
+  try {
+    await env.DB.prepare("SELECT 1 AS ok").first<{ ok: number }>();
+  } catch {
+    database = "degraded";
+    transcription = "degraded";
+    quota = "degraded";
+  }
+
+  if (database === "operational") {
+    try {
+      const runtime = await readActiveAiConfiguration(env);
+      if (!runtime.config.service.enabled) {
+        transcription = "maintenance";
+        maintenanceMessage = runtime.config.service.maintenanceMessage;
+      }
+    } catch {
+      transcription = "degraded";
+    }
+
+    try {
+      const row = await env.DB.prepare(
+        "SELECT used_neurons, reserved_neurons FROM global_daily_usage WHERE date_key = ?",
+      ).bind(dateKey).first<{ used_neurons: number; reserved_neurons: number }>();
+      const committed = (row?.used_neurons ?? 0) + (row?.reserved_neurons ?? 0);
+      if (committed >= GLOBAL_DAILY_NEURON_LIMIT) {
+        quota = "exhausted";
+      }
+    } catch {
+      quota = "degraded";
+    }
+  }
+
+  const overallStatus: "online" | "degraded" | "maintenance" =
+    database === "degraded" || transcription === "degraded" || quota === "degraded" || quota === "exhausted"
+      ? "degraded"
+      : transcription === "maintenance"
+        ? "maintenance"
+        : "online";
+
+  return noStoreJson(
+    {
+      name: "LiVoice API",
+      status: overallStatus,
+      apiVersion: "v1",
+      checkedAt,
+      ...(maintenanceMessage ? { maintenanceMessage } : {}),
+      components: {
+        database,
+        transcription,
+        quota,
+      },
+      documentation: "https://github.com/LiLabsAI/LiVoice",
+      authentication: "Passwordless LiVoice account required for protected endpoints",
+    },
+    { status: database === "degraded" ? 503 : 200 },
+  );
+}
+
 function androidAssetLinks(env: AppEnv): unknown[] {
+  const fingerprints = env.ENVIRONMENT === "production"
+    ? [RELEASE_V2_CERT_SHA256, LEGACY_RELEASE_CERT_SHA256]
+    : [RELEASE_V2_CERT_SHA256, LEGACY_RELEASE_CERT_SHA256, DEBUG_CERT_SHA256];
   return [
     {
       relation: ["delegate_permission/common.handle_all_urls"],
       target: {
         namespace: "android_app",
         package_name: "com.aliahad.wovoice",
-        // Preserve App Links for v1.3 and the original private debug-signed
-        // installation while v1.5 moves public releases to the v2 signer.
-        sha256_cert_fingerprints: [RELEASE_V2_CERT_SHA256, LEGACY_RELEASE_CERT_SHA256, DEBUG_CERT_SHA256],
+        // Preserve App Links for v1.3 while public releases use the v2 signer.
+        // Only non-production environments publish the local debug certificate.
+        sha256_cert_fingerprints: fingerprints,
       },
     },
   ];
+}
+
+function estimateConservativeCostUsd(
+  model: "whisper-large-v3-turbo" | "nova-3",
+  audioSeconds: number,
+  cleanupModel: CleanupModel,
+  totalNeurons: number,
+): number {
+  const minutes = audioSeconds / 60;
+  const nova = model === "nova-3";
+  const asrNeurons = minutes * (nova ? NOVA_NEURONS_PER_MINUTE : WHISPER_NEURONS_PER_MINUTE);
+  const asrCost = minutes * (nova ? NOVA_USD_PER_MINUTE : WHISPER_USD_PER_MINUTE);
+  const polishNeurons = Math.max(0, totalNeurons - asrNeurons);
+  const cleanupRate = cleanupPricing(cleanupModel);
+  const usdPerNeuron = cleanupRate.outputUsdPerMillion / cleanupRate.outputNeuronsPerMillion;
+  return round(asrCost + polishNeurons * usdPerNeuron, 8);
 }
 
 export interface UsageEstimate {

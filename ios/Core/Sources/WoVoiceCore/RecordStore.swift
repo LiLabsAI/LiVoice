@@ -105,7 +105,7 @@ import CSQLite
         try save(owner: owner, record: restored)
     }
     public func pending(owner: String, historyEnabled: Bool, skipNewDictionary: Bool = false) throws -> [Pending] {
-        let stmt = try statement("SELECT id,version,deleted,payload,revision,type FROM records WHERE owner=? AND dirty=1 AND hold_until<=? \(historyEnabled ? "" : "AND type!='history'") \(skipNewDictionary ? "AND NOT(type='dictionary' AND version=0 AND deleted=0)" : "") ORDER BY deleted DESC,rowid LIMIT 100")
+        let stmt = try statement("SELECT id,version,deleted,payload,revision,type FROM records WHERE owner=? AND dirty=1 AND hold_until<=? AND NOT(type='dictionary' AND deleted=0 AND json_extract(CAST(payload AS TEXT),'$.status')='suggested') \(historyEnabled ? "" : "AND type!='history'") \(skipNewDictionary ? "AND NOT(type='dictionary' AND version=0 AND deleted=0)" : "") ORDER BY deleted DESC,rowid LIMIT 100")
         defer { sqlite3_finalize(stmt) }; bind([owner], to: stmt)
         sqlite3_bind_double(stmt,2,Date.now.timeIntervalSince1970)
         var result: [Pending] = []
@@ -128,7 +128,7 @@ import CSQLite
         if remote.version == 0, !remote.deleted, remote.payload == nil, var local {
             local.version = 0; try save(owner: owner, record: local); return
         }
-        if let local, local.deleted && !remote.deleted {
+        if let local, (local.deleted && !remote.deleted) || (!local.deleted && remote.deleted) {
             let pending = try isDirty(owner: owner, type: local.type, id: local.id)
             if pending {
                 let held = try heldUntil(owner: owner, type: local.type, id: local.id)
@@ -169,7 +169,8 @@ import CSQLite
     public func applySettings(owner: String, settings: CloudSettings) throws {
         try setMetadata("cloudSettings", owner: owner, value: settings)
         if !settings.historySyncEnabled {
-            try execute("UPDATE records SET version=0,dirty=1 WHERE owner=? AND type='history'", strings: [owner])
+            try execute("DELETE FROM records WHERE owner=? AND type='history' AND deleted=1", strings: [owner])
+            try execute("UPDATE records SET version=0,dirty=1 WHERE owner=? AND type='history' AND deleted=0", strings: [owner])
         }
         try applyRetention(owner: owner, days: settings.historyRetentionDays)
     }

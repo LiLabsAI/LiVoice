@@ -9,6 +9,7 @@ interface ApiOptions {
   method?: "GET" | "POST" | "PUT";
   body?: unknown;
   csrf?: boolean;
+  signal?: AbortSignal;
 }
 
 export async function adminApi<T>(path: string, options: ApiOptions = {}): Promise<T> {
@@ -24,6 +25,7 @@ export async function adminApi<T>(path: string, options: ApiOptions = {}): Promi
     credentials: "same-origin",
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    signal: options.signal,
   });
   const value = await response.json().catch(() => null) as { error?: { message?: string } } | T | null;
   if (!response.ok) {
@@ -48,7 +50,8 @@ export function safeReturnTo(value: string | null): string {
   if (!value || !value.startsWith("/admin") || value.startsWith("//")) return "/admin/";
   try {
     const url = new URL(value, "https://wovoice.invalid");
-    return url.origin === "https://wovoice.invalid" && url.pathname.startsWith("/admin")
+    const validPath = url.pathname === "/admin" || url.pathname.startsWith("/admin/");
+    return url.origin === "https://wovoice.invalid" && validPath
       ? `${url.pathname}${url.search}${url.hash}`
       : "/admin/";
   } catch {
